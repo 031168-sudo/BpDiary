@@ -235,63 +235,58 @@ fun MeasurementDialog(
     }
     val valid = s != null && d != null && error == null
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "Новый замер" else "Замер") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    NumField("Верхнее", sys, Modifier.weight(1f)) { sys = it }
-                    NumField("Нижнее", dia, Modifier.weight(1f)) { dia = it }
-                    NumField("Пульс", pulse, Modifier.weight(1f)) { pulse = it }
-                }
-                if (s != null && d != null && error == null) {
-                    val cat = BpNorms.classify(s, d)
-                    CategoryLabel(cat.title, Color(cat.argb))
-                }
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { pickDate(ctx, dt.toLocalDate()) { dt = it.atTime(dt.toLocalTime()) } }) {
-                        Text(dt.format(DateTimeFormatter.ofPattern("d MMM yyyy", RU)))
-                    }
-                    OutlinedButton(onClick = { pickTime(ctx, dt.toLocalTime()) { dt = dt.toLocalDate().atTime(it) } }) {
-                        Text(dt.format(TIME_FMT))
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Рука:")
-                    listOf("Л", "П").forEach { a ->
-                        FilterChip(selected = arm == a, onClick = { arm = if (arm == a) null else a }, label = { Text(a) })
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = irregular, onCheckedChange = { irregular = it })
-                    Text("Тонометр показал аритмию")
-                }
-                OutlinedTextField(note, { note = it }, label = { Text("Заметка (самочувствие, нагрузка…)") },
-                    modifier = Modifier.fillMaxWidth())
-                if (anomalies.isNotEmpty()) {
-                    anomalies.forEach { Text("⚠ $it", color = Color(0xFFE65100), style = MaterialTheme.typography.bodySmall) }
-                }
-                if (onDelete != null) {
-                    TextButton(onClick = { confirmDelete = true }) {
-                        Text("Удалить замер", color = MaterialTheme.colorScheme.error)
-                    }
-                }
+    EditorDialog(
+        title = if (initial == null) "Новый замер" else "Замер",
+        saveEnabled = valid,
+        onDismiss = onDismiss,
+        onSave = {
+            onSave(Measurement(
+                id = initial?.id ?: 0,
+                timestamp = dt.atZone(zone).toInstant().toEpochMilli(),
+                systolic = s!!, diastolic = d!!, pulse = p,
+                arm = arm, irregular = irregular, note = note.trim(),
+            ))
+        },
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            NumField("Верхнее", sys, Modifier.weight(1f)) { sys = it }
+            NumField("Нижнее", dia, Modifier.weight(1f)) { dia = it }
+            NumField("Пульс", pulse, Modifier.weight(1f)) { pulse = it }
+        }
+        if (s != null && d != null && error == null) {
+            val cat = BpNorms.classify(s, d)
+            CategoryLabel(cat.title, Color(cat.argb))
+        }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { pickDate(ctx, dt.toLocalDate()) { dt = it.atTime(dt.toLocalTime()) } }) {
+                Text(dt.format(DateTimeFormatter.ofPattern("d MMM yyyy", RU)))
             }
-        },
-        confirmButton = {
-            TextButton(enabled = valid, onClick = {
-                onSave(Measurement(
-                    id = initial?.id ?: 0,
-                    timestamp = dt.atZone(zone).toInstant().toEpochMilli(),
-                    systolic = s!!, diastolic = d!!, pulse = p,
-                    arm = arm, irregular = irregular, note = note.trim(),
-                ))
-            }) { Text("Сохранить") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
-    )
+            OutlinedButton(onClick = { pickTime(ctx, dt.toLocalTime()) { dt = dt.toLocalDate().atTime(it) } }) {
+                Text(dt.format(TIME_FMT))
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Рука:")
+            listOf("Л", "П").forEach { a ->
+                FilterChip(selected = arm == a, onClick = { arm = if (arm == a) null else a }, label = { Text(a) })
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = irregular, onCheckedChange = { irregular = it })
+            Text("Тонометр показал аритмию")
+        }
+        OutlinedTextField(note, { note = it }, label = { Text("Заметка (самочувствие, нагрузка…)") },
+            modifier = Modifier.fillMaxWidth())
+        if (anomalies.isNotEmpty()) {
+            anomalies.forEach { Text("⚠ $it", color = Color(0xFFE65100), style = MaterialTheme.typography.bodySmall) }
+        }
+        if (onDelete != null) {
+            TextButton(onClick = { confirmDelete = true }) {
+                Text("Удалить замер", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
 
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false },

@@ -118,46 +118,41 @@ private fun MedicationDialog(
         .all { Regex("""^([01]?\d|2[0-3]):[0-5]\d$""").matches(it) }
     val valid = name.isNotBlank() && timesOk && (!stopped || !end.isBefore(start))
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "Новый препарат" else "Препарат") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("Название") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(dose, { dose = it }, label = { Text("Дозировка, например 50 мг") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(times, { times = it }, label = { Text("Время приёма через запятую") },
-                    supportingText = { Text(if (timesOk) "Например: 08:00, 20:00" else "Формат ЧЧ:ММ через запятую") },
-                    isError = !timesOk, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Начало: ", Modifier.padding(end = 8.dp))
-                    OutlinedButton(onClick = { pickDate(ctx, start) { start = it } }) { Text(start.format(DATE_FMT)) }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(stopped, { stopped = it })
-                    Text("Отменён / заменён")
-                }
-                if (stopped) Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Последний день: ", Modifier.padding(end = 8.dp))
-                    OutlinedButton(onClick = { pickDate(ctx, end) { end = it } }) { Text(end.format(DATE_FMT)) }
-                }
-                OutlinedTextField(note, { note = it }, label = { Text("Заметка") }, modifier = Modifier.fillMaxWidth())
-                if (onDelete != null) TextButton(onClick = { confirmDelete = true }) {
-                    Text("Удалить препарат и его отметки", color = MaterialTheme.colorScheme.error)
-                }
-            }
+    EditorDialog(
+        title = if (initial == null) "Новый препарат" else "Препарат",
+        saveEnabled = valid,
+        onDismiss = onDismiss,
+        onSave = {
+            onSave(Medication(
+                id = initial?.id ?: 0, name = name.trim(), dose = dose.trim(),
+                times = times.split(',', ';', ' ').map { it.trim() }.filter { it.isNotEmpty() }
+                    .map { t -> t.padStart(5, '0') }.joinToString(", "),
+                startDay = start.toEpochDay(), endDay = if (stopped) end.toEpochDay() else null, note = note.trim(),
+            ))
         },
-        confirmButton = {
-            TextButton(enabled = valid, onClick = {
-                onSave(Medication(
-                    id = initial?.id ?: 0, name = name.trim(), dose = dose.trim(),
-                    times = times.split(',', ';', ' ').map { it.trim() }.filter { it.isNotEmpty() }
-                        .map { t -> t.padStart(5, '0') }.joinToString(", "),
-                    startDay = start.toEpochDay(), endDay = if (stopped) end.toEpochDay() else null, note = note.trim(),
-                ))
-            }) { Text("Сохранить") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
-    )
+    ) {
+        OutlinedTextField(name, { name = it }, label = { Text("Название") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(dose, { dose = it }, label = { Text("Дозировка, например 50 мг") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(times, { times = it }, label = { Text("Время приёма через запятую") },
+            supportingText = { Text(if (timesOk) "Например: 08:00, 20:00" else "Формат ЧЧ:ММ через запятую") },
+            isError = !timesOk, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Начало: ", Modifier.padding(end = 8.dp))
+            OutlinedButton(onClick = { pickDate(ctx, start) { start = it } }) { Text(start.format(DATE_FMT)) }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(stopped, { stopped = it })
+            Text("Отменён / заменён")
+        }
+        if (stopped) Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Последний день: ", Modifier.padding(end = 8.dp))
+            OutlinedButton(onClick = { pickDate(ctx, end) { end = it } }) { Text(end.format(DATE_FMT)) }
+        }
+        OutlinedTextField(note, { note = it }, label = { Text("Заметка") }, modifier = Modifier.fillMaxWidth())
+        if (onDelete != null) TextButton(onClick = { confirmDelete = true }) {
+            Text("Удалить препарат и его отметки", color = MaterialTheme.colorScheme.error)
+        }
+    }
 
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false },

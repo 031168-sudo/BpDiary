@@ -13,8 +13,8 @@ android {
         applicationId = "ru.bpdiary"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
     }
 
     // Постоянный ключ, чтобы каждая новая сборка ставилась поверх старой без потери данных
