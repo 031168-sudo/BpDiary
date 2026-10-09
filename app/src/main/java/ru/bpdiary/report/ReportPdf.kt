@@ -68,7 +68,7 @@ object ReportPdf {
         }
 
         fun finishPage() {
-            c.drawText("Дневник гипертоника · стр. $pageNo", M, H - 20f, small)
+            c.drawText("Давление · стр. $pageNo", M, H - 20f, small)
             doc.finishPage(page)
         }
 

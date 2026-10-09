@@ -68,7 +68,7 @@ fun App(vm: MainViewModel = viewModel()) {
         var tab by rememberSaveable { mutableIntStateOf(0) }
         val current = Tab.entries[tab]
         Scaffold(
-            topBar = { TopAppBar(title = { Text(if (current == Tab.DIARY) "Дневник гипертоника" else current.title) }) },
+            topBar = { TopAppBar(title = { Text(if (current == Tab.DIARY) "Давление" else current.title) }) },
             bottomBar = {
                 NavigationBar {
                     Tab.entries.forEachIndexed { i, t ->

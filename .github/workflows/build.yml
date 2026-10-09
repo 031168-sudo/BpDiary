@@ -16,20 +16,20 @@ jobs:
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
       - run: chmod +x gradlew && ./gradlew assembleDebug --stacktrace
-      - run: cp app/build/outputs/apk/debug/app-debug.apk DnevnikGipertonika.apk
+      - run: cp app/build/outputs/apk/debug/app-debug.apk Davlenie.apk
       - uses: actions/upload-artifact@v4
         with:
           name: BpDiary-apk
-          path: DnevnikGipertonika.apk
+          path: Davlenie.apk
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest DnevnikGipertonika.apk --title "Дневник гипертоника (${GITHUB_SHA::7})" --notes "Сборка из ${GITHUB_SHA::7}"
+          gh release create latest Davlenie.apk --title "Давление (${GITHUB_SHA::7})" --notes "Сборка из ${GITHUB_SHA::7}"
       - name: Push APK to apk branch
         run: |
-          mkdir out && cp DnevnikGipertonika.apk out/ && cd out
+          mkdir out && cp Davlenie.apk out/ && cd out
           git init -q && git checkout -q -b apk
           git config user.name "github-actions" && git config user.email "actions@github.com"
           git add . && git commit -q -m "APK ${GITHUB_SHA::7}"
