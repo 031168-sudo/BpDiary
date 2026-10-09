@@ -47,7 +47,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ru.bpdiary.analysis.Analyzer
@@ -300,12 +303,24 @@ fun MeasurementDialog(
 
 @Composable
 private fun NumField(label: String, value: String, modifier: Modifier, onChange: (String) -> Unit) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = { v -> onChange(v.filter { it.isDigit() }.take(3)) },
-        label = { Text(label) },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        modifier = modifier,
-    )
+    // Подпись над полем в одну строку, цифры крупно по центру — без переносов при любом размере шрифта
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.size(4.dp))
+        OutlinedTextField(
+            value = value,
+            onValueChange = { v -> onChange(v.filter { it.isDigit() }.take(3)) },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.headlineSmall.copy(textAlign = TextAlign.Center),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
