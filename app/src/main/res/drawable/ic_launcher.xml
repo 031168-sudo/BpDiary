@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Простая иконка: сердце с линией пульса -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#C62828"
+        android:pathData="M0,0h108v108h-108z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,82 L30,58 C22,50 22,38 30,32 C37,27 47,29 54,38 C61,29 71,27 78,32 C86,38 86,50 78,58 Z" />
+    <path
+        android:strokeColor="#C62828"
+        android:strokeWidth="4"
+        android:strokeLineJoin="round"
+        android:strokeLineCap="round"
+        android:pathData="M30,52 L42,52 L47,42 L53,62 L59,46 L63,52 L78,52" />
+</vector>
