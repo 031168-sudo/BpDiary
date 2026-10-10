@@ -23,9 +23,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -56,7 +58,9 @@ import androidx.compose.ui.unit.sp
 import ru.bpdiary.analysis.Analyzer
 import ru.bpdiary.analysis.BpNorms
 import ru.bpdiary.analysis.StabilityState
+import ru.bpdiary.data.DoseLog
 import ru.bpdiary.data.Measurement
+import ru.bpdiary.data.Medication
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -77,6 +81,12 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier) {
     val today = LocalDate.now()
     val activeMeds = meds.filter { it.isActiveOn(today.toEpochDay()) }
     val grouped = list.groupBy { Analyzer.dateOf(it) }
+    // Дни, где показываем приём лекарств: с первого дня пользования приложением (не раньше 60 дней назад)
+    val trackingStart = (list.map { Analyzer.dateOf(it).toEpochDay() } + logs.map { it.day }).minOrNull() ?: today.toEpochDay()
+    val doseDays = (maxOf(trackingStart, today.minusDays(60).toEpochDay()) until today.toEpochDay())
+        .filter { d -> meds.any { it.isActiveOn(d) } }
+        .map { LocalDate.ofEpochDay(it) }
+    val allDays = (grouped.keys + doseDays + today).toSortedSet(compareByDescending { it })
 
     Box(modifier.fillMaxSize()) {
         LazyColumn(
@@ -139,10 +149,16 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier) {
                 }
             }
             // список по дням
-            grouped.forEach { (day, dayItems) ->
+            allDays.forEach { day ->
+                val dayItems = grouped[day].orEmpty()
+                val dayMeds = if (day == today) emptyList() else meds.filter { it.isActiveOn(day.toEpochDay()) }
+                if (dayItems.isEmpty() && dayMeds.isEmpty()) return@forEach
                 item(key = "h$day") {
                     Text(dayTitle(day, today), style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
+                }
+                if (dayMeds.isNotEmpty()) item(key = "d$day") {
+                    DoseDayBlock(day, dayMeds, logs) { med, slot, taken -> vm.setDoseTaken(med, day.toEpochDay(), slot, taken) }
                 }
                 items(dayItems, key = { it.id }) { m ->
                     MeasurementRow(m, analysis?.anomalyIds?.containsKey(m.id) == true) { editing = m }
@@ -163,6 +179,50 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier) {
             onDelete = { vm.deleteMeasurement(e); editing = null },
             anomalies = analysis?.anomalyIds?.get(e.id)?.map { "${it.type.title}: ${it.detail}" } ?: emptyList(),
         )
+    }
+}
+
+/** Приём лекарств за прошедший день: нажатие ставит или снимает отметку. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun DoseDayBlock(
+    day: LocalDate, meds: List<Medication>, logs: List<DoseLog>,
+    onToggle: (Medication, String, Boolean) -> Unit,
+) {
+    val zone = ZoneId.systemDefault()
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            meds.forEach { med ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Medication, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(6.dp))
+                    Text("${med.name} ${med.dose}".trim(), style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    med.slots().forEach { slot ->
+                        val log = logs.firstOrNull { it.medicationId == med.id && it.day == day.toEpochDay() && it.slot == slot }
+                        val label = if (log != null) {
+                            val at = java.time.Instant.ofEpochMilli(log.takenAt).atZone(zone)
+                            if (at.toLocalDate() == day) "$slot · принято в ${at.format(TIME_FMT)}"
+                            else "$slot · принято (отмечено позже)"
+                        } else "$slot · пропущено"
+                        val check: @Composable () -> Unit = { Icon(Icons.Filled.Check, null, Modifier.size(16.dp)) }
+                        FilterChip(
+                            selected = log != null,
+                            onClick = { onToggle(med, slot, log == null) },
+                            label = {
+                                Text(label, color = if (log == null) MaterialTheme.colorScheme.error else Color.Unspecified)
+                            },
+                            leadingIcon = if (log != null) check else null,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

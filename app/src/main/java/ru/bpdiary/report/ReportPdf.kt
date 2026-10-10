@@ -146,7 +146,8 @@ object ReportPdf {
                 val period = "с ${LocalDate.ofEpochDay(m.startDay).format(dFmt)}" +
                     (m.endDay?.let { " по ${LocalDate.ofEpochDay(it).format(dFmt)}" } ?: " — по настоящее время")
                 w.para("${m.name} ${m.dose}, приём: ${m.slots().joinToString(", ")}; $period", w.bold, 1f)
-                a.medEffects.firstOrNull { it.med.id == m.id }?.let { w.para(it.text, w.body, 6f) }
+                a.medEffects.firstOrNull { it.med.id == m.id }?.let { w.para(it.text, w.body, 2f) }
+                adherenceLine(m, from, to, all, logs)?.let { w.para(it, w.body, 6f) }
             }
         }
 
@@ -209,6 +210,42 @@ object ReportPdf {
         FileOutputStream(file).use { doc.writeTo(it) }
         doc.close()
         return FileProvider.getUriForFile(ctx, ctx.packageName + ".files", file)
+    }
+
+    /** «Приёмов отмечено N из M (P%). Пропуски: …» за период отчёта. */
+    private fun adherenceLine(
+        m: Medication, from: LocalDate, to: LocalDate, all: List<Measurement>, logs: List<DoseLog>,
+    ): String? {
+        val medLogs = logs.filter { it.medicationId == m.id }
+        if (medLogs.isEmpty()) return null
+        // считаем с первого дня пользования приложением, чтобы не записывать в пропуски время до установки
+        val trackingStart = (all.map { Analyzer.dateOf(it).toEpochDay() } + logs.map { it.day }).minOrNull() ?: return null
+        val today = LocalDate.now().toEpochDay()
+        val first = maxOf(from.toEpochDay(), m.startDay, trackingStart)
+        val last = minOf(to.toEpochDay(), m.endDay ?: today, today)
+        if (first > last) return null
+        val slots = m.slots()
+        val taken = medLogs.map { it.day to it.slot }.toSet()
+        val missed = ArrayList<String>()
+        var expected = 0
+        val f = DateTimeFormatter.ofPattern("d MMM", ru)
+        for (d in first..last) for (slot in slots) {
+            // сегодняшний приём, время которого ещё не наступило, не считаем
+            if (d == today && slot.length == 5 && slot > java.time.LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))) continue
+            expected++
+            if ((d to slot) !in taken) missed += "${LocalDate.ofEpochDay(d).format(f)} $slot"
+        }
+        if (expected == 0) return null
+        val pct = ((expected - missed.size) * 100.0 / expected).roundToInt()
+        return buildString {
+            append("Приём отмечен: ${expected - missed.size} из $expected ($pct%).")
+            if (missed.isNotEmpty()) {
+                append(" Пропуски: ")
+                append(missed.take(40).joinToString(", "))
+                if (missed.size > 40) append(" и ещё ${missed.size - 40}")
+                append(".")
+            }
+        }
     }
 
     private fun ellipsize(s: String, p: Paint, maxW: Float): String {
