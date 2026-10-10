@@ -9,6 +9,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.Transaction
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
@@ -37,15 +38,22 @@ interface MedicationDao {
 }
 
 @Dao
-interface DoseLogDao {
+abstract class DoseLogDao {
     @Query("SELECT * FROM dose_logs")
-    fun observeAll(): Flow<List<DoseLog>>
+    abstract fun observeAll(): Flow<List<DoseLog>>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insert(log: DoseLog)
+    abstract suspend fun insert(log: DoseLog)
 
     @Query("DELETE FROM dose_logs WHERE medicationId = :medId AND day = :day AND slot = :slot")
-    suspend fun remove(medId: Long, day: Long, slot: String)
+    abstract suspend fun remove(medId: Long, day: Long, slot: String)
+
+    /** Поставить отметку или поменять время уже поставленной. */
+    @Transaction
+    open suspend fun replace(log: DoseLog) {
+        remove(log.medicationId, log.day, log.slot)
+        insert(log)
+    }
 }
 
 @Database(

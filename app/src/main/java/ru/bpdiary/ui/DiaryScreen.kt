@@ -103,14 +103,11 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier) {
                             Text("${med.name} ${med.dose}", style = MaterialTheme.typography.bodyMedium)
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 med.slots().forEach { slot ->
-                                    val taken = logs.any { it.medicationId == med.id && it.day == today.toEpochDay() && it.slot == slot }
-                                    val check: @Composable () -> Unit = { Icon(Icons.Filled.Check, null, Modifier.size(16.dp)) }
-                                    FilterChip(
-                                        selected = taken,
-                                        onClick = { vm.setDoseTaken(med, today.toEpochDay(), slot, !taken) },
-                                        label = { Text(if (taken) "$slot — принял" else slot) },
-                                        leadingIcon = if (taken) check else null,
-                                    )
+                                    val d = today.toEpochDay()
+                                    DoseChip(med, today, slot,
+                                        logs.firstOrNull { it.medicationId == med.id && it.day == d && it.slot == slot },
+                                        onSet = { vm.setDoseTime(med, d, slot, it) },
+                                        onClear = { vm.clearDose(med, d, slot) })
                                 }
                             }
                         }
@@ -158,7 +155,7 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier) {
                         color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
                 }
                 if (dayMeds.isNotEmpty()) item(key = "d$day") {
-                    DoseDayBlock(day, dayMeds, logs) { med, slot, taken -> vm.setDoseTaken(med, day.toEpochDay(), slot, taken) }
+                    DoseDayBlock(day, dayMeds, logs, vm)
                 }
                 items(dayItems, key = { it.id }) { m ->
                     MeasurementRow(m, analysis?.anomalyIds?.containsKey(m.id) == true) { editing = m }
@@ -182,14 +179,11 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier) {
     }
 }
 
-/** Приём лекарств за прошедший день: нажатие ставит или снимает отметку. */
+/** Приём лекарств за прошедший день: нажатие — отметить с временем, изменить время или снять отметку. */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun DoseDayBlock(
-    day: LocalDate, meds: List<Medication>, logs: List<DoseLog>,
-    onToggle: (Medication, String, Boolean) -> Unit,
-) {
-    val zone = ZoneId.systemDefault()
+private fun DoseDayBlock(day: LocalDate, meds: List<Medication>, logs: List<DoseLog>, vm: MainViewModel) {
+    val d = day.toEpochDay()
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -204,21 +198,10 @@ private fun DoseDayBlock(
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     med.slots().forEach { slot ->
-                        val log = logs.firstOrNull { it.medicationId == med.id && it.day == day.toEpochDay() && it.slot == slot }
-                        val label = if (log != null) {
-                            val at = java.time.Instant.ofEpochMilli(log.takenAt).atZone(zone)
-                            if (at.toLocalDate() == day) "$slot · принято в ${at.format(TIME_FMT)}"
-                            else "$slot · принято (отмечено позже)"
-                        } else "$slot · пропущено"
-                        val check: @Composable () -> Unit = { Icon(Icons.Filled.Check, null, Modifier.size(16.dp)) }
-                        FilterChip(
-                            selected = log != null,
-                            onClick = { onToggle(med, slot, log == null) },
-                            label = {
-                                Text(label, color = if (log == null) MaterialTheme.colorScheme.error else Color.Unspecified)
-                            },
-                            leadingIcon = if (log != null) check else null,
-                        )
+                        DoseChip(med, day, slot,
+                            logs.firstOrNull { it.medicationId == med.id && it.day == d && it.slot == slot },
+                            onSet = { vm.setDoseTime(med, d, slot, it) },
+                            onClear = { vm.clearDose(med, d, slot) })
                     }
                 }
             }

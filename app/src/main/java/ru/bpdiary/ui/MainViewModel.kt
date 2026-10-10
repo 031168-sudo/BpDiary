@@ -42,9 +42,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun saveMedication(m: Medication) = viewModelScope.launch { db.medications().upsert(m) }
     fun deleteMedication(m: Medication) = viewModelScope.launch { db.medications().delete(m) }
 
-    fun setDoseTaken(med: Medication, day: Long, slot: String, taken: Boolean) = viewModelScope.launch {
-        if (taken) db.doseLogs().insert(DoseLog(medicationId = med.id, day = day, slot = slot, takenAt = System.currentTimeMillis()))
-        else db.doseLogs().remove(med.id, day, slot)
+    /** Отметить приём с конкретным временем (или изменить время уже отмеченного). */
+    fun setDoseTime(med: Medication, day: Long, slot: String, takenAt: Long) = viewModelScope.launch {
+        db.doseLogs().replace(DoseLog(medicationId = med.id, day = day, slot = slot, takenAt = takenAt))
+    }
+
+    fun clearDose(med: Medication, day: Long, slot: String) = viewModelScope.launch {
+        db.doseLogs().remove(med.id, day, slot)
     }
 
     suspend fun buildReport(from: LocalDate, to: LocalDate): Uri = withContext(Dispatchers.Default) {
