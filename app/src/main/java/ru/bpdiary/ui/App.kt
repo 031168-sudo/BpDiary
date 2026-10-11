@@ -10,9 +10,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -24,7 +27,9 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -66,9 +71,25 @@ private enum class Tab(val title: String, val icon: ImageVector) {
 fun App(vm: MainViewModel = viewModel()) {
     BpTheme {
         var tab by rememberSaveable { mutableIntStateOf(0) }
+        var showBackup by rememberSaveable { mutableStateOf(false) }
+        val backup by vm.backupStatus.collectAsState()
         val current = Tab.entries[tab]
         Scaffold(
-            topBar = { TopAppBar(title = { Text(if (current == Tab.DIARY) "Давление" else current.title) }) },
+            topBar = {
+                TopAppBar(
+                    title = { Text(if (current == Tab.DIARY) "Давление" else current.title) },
+                    actions = {
+                        IconButton(onClick = { showBackup = true }) {
+                            Icon(
+                                if (backup.folder == null || backup.error != null) Icons.Filled.CloudOff else Icons.Filled.CloudDone,
+                                "Резервная копия",
+                                tint = if (backup.folder == null || backup.error != null) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                )
+            },
             bottomBar = {
                 NavigationBar {
                     Tab.entries.forEachIndexed { i, t ->
@@ -82,12 +103,13 @@ fun App(vm: MainViewModel = viewModel()) {
         ) { pad ->
             val m = Modifier.padding(pad)
             when (current) {
-                Tab.DIARY -> DiaryScreen(vm, m)
+                Tab.DIARY -> DiaryScreen(vm, m) { showBackup = true }
                 Tab.CHARTS -> ChartsScreen(vm, m)
                 Tab.ANALYSIS -> AnalysisScreen(vm, m)
                 Tab.MEDS -> MedicationsScreen(vm, m)
             }
         }
+        if (showBackup) BackupScreen(vm) { showBackup = false }
     }
 }
 

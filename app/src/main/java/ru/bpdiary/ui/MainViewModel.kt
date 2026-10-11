@@ -5,7 +5,10 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
@@ -15,12 +18,16 @@ import kotlinx.coroutines.withContext
 import ru.bpdiary.analysis.AnalysisResult
 import ru.bpdiary.analysis.Analyzer
 import ru.bpdiary.data.AppDatabase
+import ru.bpdiary.data.AutoBackup
+import ru.bpdiary.data.BackupRepo
+import ru.bpdiary.data.Snapshot
 import ru.bpdiary.data.DoseLog
 import ru.bpdiary.data.Measurement
 import ru.bpdiary.data.Medication
 import ru.bpdiary.report.ReportPdf
 import java.time.LocalDate
 
+@OptIn(FlowPreview::class)
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val db = AppDatabase.get(app)
 
@@ -30,6 +37,59 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         db.medications().observeAll().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val doseLogs: StateFlow<List<DoseLog>> =
         db.doseLogs().observeAll().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    // ── резервное копирование ──
+    data class BackupStatus(val folder: String?, val last: Long, val error: String?)
+
+    private val _backup = MutableStateFlow(readBackupStatus())
+    val backupStatus: StateFlow<BackupStatus> = _backup
+
+    private fun readBackupStatus() = getApplication<Application>().let {
+        BackupStatus(AutoBackup.folderName(it), AutoBackup.lastBackup(it), AutoBackup.lastError(it))
+    }
+
+    init {
+        // После любого изменения данных (с паузой 2 с) — копия в выбранную папку.
+        viewModelScope.launch {
+            combine(db.measurements().observeAll(), db.medications().observeAll(), db.doseLogs().observeAll()) { _, _, _ -> }
+                .debounce(2000)
+                .collect { backupNow() }
+        }
+    }
+
+    suspend fun backupNow(): Boolean = withContext(Dispatchers.IO) {
+        val ctx = getApplication<Application>()
+        if (AutoBackup.folder(ctx) == null) return@withContext false
+        val ok = AutoBackup.run(ctx, BackupRepo.snapshot(db))
+        _backup.value = readBackupStatus()
+        ok
+    }
+
+    /** Выбрана папка. Если база пустая, а в папке уже есть копия — вернуть её, чтобы предложить восстановить. */
+    suspend fun chooseBackupFolder(uri: Uri?): Snapshot? = withContext(Dispatchers.IO) {
+        val ctx = getApplication<Application>()
+        AutoBackup.setFolder(ctx, uri)
+        _backup.value = readBackupStatus()
+        if (uri == null) return@withContext null
+        val current = BackupRepo.snapshot(db)
+        if (current.isEmpty) AutoBackup.findExisting(ctx)?.second
+        else { backupNow(); null }
+    }
+
+    suspend fun exportTo(uri: Uri): Snapshot = withContext(Dispatchers.IO) {
+        val s = BackupRepo.snapshot(db)
+        BackupRepo.write(getApplication(), uri, s)
+        s
+    }
+
+    suspend fun readBackup(uri: Uri): Snapshot = withContext(Dispatchers.IO) { BackupRepo.read(getApplication(), uri) }
+
+    suspend fun currentSnapshot(): Snapshot = withContext(Dispatchers.IO) { BackupRepo.snapshot(db) }
+
+    suspend fun restore(s: Snapshot) = withContext(Dispatchers.IO) {
+        AutoBackup.saveBeforeRestore(getApplication(), BackupRepo.snapshot(db))
+        BackupRepo.restore(db, s)
+    }
 
     val analysis: StateFlow<AnalysisResult?> =
         combine(measurements, medications, doseLogs) { m, md, l -> Analyzer.analyze(m, md, l, LocalDate.now()) }

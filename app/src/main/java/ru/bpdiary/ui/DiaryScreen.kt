@@ -70,11 +70,12 @@ import kotlin.math.roundToInt
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-fun DiaryScreen(vm: MainViewModel, modifier: Modifier) {
+fun DiaryScreen(vm: MainViewModel, modifier: Modifier, onOpenBackup: () -> Unit = {}) {
     val list by vm.measurements.collectAsState()
     val meds by vm.medications.collectAsState()
     val logs by vm.doseLogs.collectAsState()
     val analysis by vm.analysis.collectAsState()
+    val backup by vm.backupStatus.collectAsState()
     var editing by remember { mutableStateOf<Measurement?>(null) }
     var adding by remember { mutableStateOf(false) }
 
@@ -114,6 +115,24 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier) {
                     }
                 }
             }
+            // напоминание о резервной копии
+            if (list.isNotEmpty() && (backup.folder == null || backup.error != null)) item {
+                Card(
+                    Modifier.fillMaxWidth().clickable(onClick = onOpenBackup),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                ) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Warning, null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            if (backup.folder == null) "Резервная копия не настроена — при удалении приложения данные пропадут. Нажмите, чтобы настроить."
+                            else "Не удалось сохранить резервную копию: ${backup.error}. Нажмите, чтобы проверить.",
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
             // сводка
             item {
                 Card(Modifier.fillMaxWidth()) {
@@ -124,6 +143,7 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier) {
                             Text("Нажмите «+», чтобы добавить первый. Лучше мерить утром и вечером, " +
                                 "после 5 минут покоя, сидя, на одной и той же руке.",
                                 style = MaterialTheme.typography.bodyMedium)
+                            TextButton(onClick = onOpenBackup) { Text("Перенос с другого телефона? Восстановить из копии") }
                         } else {
                             val cat = BpNorms.classify(last.systolic, last.diastolic)
                             Text("Последний замер · ${Analyzer.dateTimeOf(last).format(DateTimeFormatter.ofPattern("d MMM, HH:mm", RU))}",

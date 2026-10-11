@@ -23,6 +23,15 @@ interface MeasurementDao {
 
     @Delete
     suspend fun delete(m: Measurement)
+
+    @Query("SELECT * FROM measurements ORDER BY timestamp")
+    suspend fun all(): List<Measurement>
+
+    @Insert
+    suspend fun insertAll(list: List<Measurement>)
+
+    @Query("DELETE FROM measurements")
+    suspend fun clear()
 }
 
 @Dao
@@ -35,6 +44,15 @@ interface MedicationDao {
 
     @Delete
     suspend fun delete(m: Medication)
+
+    @Query("SELECT * FROM medications ORDER BY id")
+    suspend fun all(): List<Medication>
+
+    @Insert
+    suspend fun insertAll(list: List<Medication>)
+
+    @Query("DELETE FROM medications")
+    suspend fun clear()
 }
 
 @Dao
@@ -47,6 +65,15 @@ abstract class DoseLogDao {
 
     @Query("DELETE FROM dose_logs WHERE medicationId = :medId AND day = :day AND slot = :slot")
     abstract suspend fun remove(medId: Long, day: Long, slot: String)
+
+    @Query("SELECT * FROM dose_logs ORDER BY day, slot")
+    abstract suspend fun all(): List<DoseLog>
+
+    @Insert
+    abstract suspend fun insertAll(list: List<DoseLog>)
+
+    @Query("DELETE FROM dose_logs")
+    abstract suspend fun clear()
 
     /** Поставить отметку или поменять время уже поставленной. */
     @Transaction
