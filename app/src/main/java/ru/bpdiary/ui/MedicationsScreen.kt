@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -28,6 +29,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -37,6 +39,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ru.bpdiary.data.Medication
+import ru.bpdiary.data.perDayText
 import java.time.LocalDate
 
 @Composable
@@ -72,13 +75,13 @@ fun MedicationsScreen(vm: MainViewModel, modifier: Modifier) {
                         Text("${m.name} ${m.dose}", fontWeight = FontWeight.SemiBold,
                             style = MaterialTheme.typography.titleMedium,
                             color = if (active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("Приём: ${m.slots().joinToString(", ")}")
+                        Text("Приём: ${m.perDayText()}")
                         Text(
                             "С ${LocalDate.ofEpochDay(m.startDay).format(DATE_FMT)}" +
                                 (m.endDay?.let { " по ${LocalDate.ofEpochDay(it).format(DATE_FMT)} (отменён)" } ?: ""),
                             style = MaterialTheme.typography.bodySmall,
                         )
-                        if (active) Text("Сегодня отмечено: $takenToday из ${m.slots().size}",
+                        if (active) Text("Сегодня принято: ${minOf(takenToday, m.perDay)} из ${m.perDay}",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                         if (m.note.isNotBlank()) Text(m.note, style = MaterialTheme.typography.bodySmall)
                     }
@@ -107,16 +110,14 @@ private fun MedicationDialog(
     val ctx = LocalContext.current
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var dose by remember { mutableStateOf(initial?.dose ?: "") }
-    var times by remember { mutableStateOf(initial?.times ?: "08:00") }
+    var perDay by remember { mutableIntStateOf(initial?.perDay ?: 1) }
     var start by remember { mutableStateOf(initial?.let { LocalDate.ofEpochDay(it.startDay) } ?: LocalDate.now()) }
     var stopped by remember { mutableStateOf(initial?.endDay != null) }
     var end by remember { mutableStateOf(initial?.endDay?.let { LocalDate.ofEpochDay(it) } ?: LocalDate.now()) }
     var note by remember { mutableStateOf(initial?.note ?: "") }
     var confirmDelete by remember { mutableStateOf(false) }
 
-    val timesOk = times.split(',', ';', ' ').map { it.trim() }.filter { it.isNotEmpty() }
-        .all { Regex("""^([01]?\d|2[0-3]):[0-5]\d$""").matches(it) }
-    val valid = name.isNotBlank() && timesOk && (!stopped || !end.isBefore(start))
+    val valid = name.isNotBlank() && (!stopped || !end.isBefore(start))
 
     EditorDialog(
         title = if (initial == null) "Новый препарат" else "Препарат",
@@ -125,17 +126,20 @@ private fun MedicationDialog(
         onSave = {
             onSave(Medication(
                 id = initial?.id ?: 0, name = name.trim(), dose = dose.trim(),
-                times = times.split(',', ';', ' ').map { it.trim() }.filter { it.isNotEmpty() }
-                    .map { t -> t.padStart(5, '0') }.joinToString(", "),
+                times = initial?.times ?: "", perDay = perDay,
                 startDay = start.toEpochDay(), endDay = if (stopped) end.toEpochDay() else null, note = note.trim(),
             ))
         },
     ) {
         OutlinedTextField(name, { name = it }, label = { Text("Название") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(dose, { dose = it }, label = { Text("Дозировка, например 50 мг") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(times, { times = it }, label = { Text("Время приёма через запятую") },
-            supportingText = { Text(if (timesOk) "Например: 08:00, 20:00" else "Формат ЧЧ:ММ через запятую") },
-            isError = !timesOk, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Text("Сколько раз в день", style = MaterialTheme.typography.labelLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            (1..4).forEach { n ->
+                FilterChip(selected = perDay == n, onClick = { perDay = n }, label = { Text("$n") })
+            }
+        }
+        Text(perDayText(perDay), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Начало: ", Modifier.padding(end = 8.dp))
             OutlinedButton(onClick = { pickDate(ctx, start) { start = it } }) { Text(start.format(DATE_FMT)) }

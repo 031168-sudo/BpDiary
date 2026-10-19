@@ -145,7 +145,7 @@ object ReportPdf {
             relevant.sortedBy { it.startDay }.forEach { m ->
                 val period = "с ${LocalDate.ofEpochDay(m.startDay).format(dFmt)}" +
                     (m.endDay?.let { " по ${LocalDate.ofEpochDay(it).format(dFmt)}" } ?: " — по настоящее время")
-                w.para("${m.name} ${m.dose}, приём: ${m.slots().joinToString(", ")}; $period", w.bold, 1f)
+                w.para("${m.name} ${m.dose}, ${m.perDayText()}; $period", w.bold, 1f)
                 a.medEffects.firstOrNull { it.med.id == m.id }?.let { w.para(it.text, w.body, 2f) }
                 adherenceLine(m, from, to, all, logs)?.let { w.para(it, w.body, 6f) }
             }
@@ -165,6 +165,27 @@ object ReportPdf {
             w.ensure(140f)
             ChartRenderer.drawPulse(w.c, RectF(M, w.y, W - M, w.y + 130f), all, from, to, ChartRenderer.LIGHT, 0.9f)
             w.y += 134f
+            val shownMeds = meds.filter { it.startDay <= to.toEpochDay() && (it.endDay ?: Long.MAX_VALUE) >= from.toEpochDay() }
+                .sortedBy { it.startDay }
+            if (shownMeds.isNotEmpty()) {
+                w.heading("Время приёма лекарств")
+                w.ensure(190f)
+                ChartRenderer.drawDoses(w.c, RectF(M, w.y, W - M, w.y + 180f), shownMeds, logs, from, to,
+                    Analyzer.trackingStart(all, logs), ChartRenderer.LIGHT, false, 0.9f)
+                w.y += 184f
+                // легенда: цветная точка + название препарата, затем «× — пропуск»
+                w.ensure(16f)
+                var lx = M
+                shownMeds.forEachIndexed { i, m ->
+                    val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ChartRenderer.medColor(i, false) }
+                    w.c.drawCircle(lx + 3f, w.y + 6.5f, 3f, dot)
+                    w.c.drawText(m.name, lx + 9f, w.y + 9.5f, w.small)
+                    lx += 9f + w.small.measureText(m.name) + 16f
+                }
+                val missP = TextPaint(w.small).apply { color = ChartRenderer.MISSED_COLOR }
+                w.c.drawText("× — день с пропущенным приёмом", lx, w.y + 9.5f, missP)
+                w.y += 18f
+            }
         }
 
         // ── таблица замеров ──
@@ -224,23 +245,24 @@ object ReportPdf {
         val first = maxOf(from.toEpochDay(), m.startDay, trackingStart)
         val last = minOf(to.toEpochDay(), m.endDay ?: today, today)
         if (first > last) return null
-        val slots = m.slots()
-        val taken = medLogs.map { it.day to it.slot }.toSet()
+        val perDay = medLogs.groupBy { it.day }.mapValues { minOf(it.value.size, m.perDay) }
         val missed = ArrayList<String>()
         var expected = 0
+        var taken = 0
         val f = DateTimeFormatter.ofPattern("d MMM", ru)
-        for (d in first..last) for (slot in slots) {
-            // сегодняшний приём, время которого ещё не наступило, не считаем
-            if (d == today && slot.length == 5 && slot > java.time.LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))) continue
-            expected++
-            if ((d to slot) !in taken) missed += "${LocalDate.ofEpochDay(d).format(f)} $slot"
+        for (d in first..last) {
+            val n = perDay[d] ?: 0
+            // сегодняшний день ещё идёт — считаем только уже сделанные приёмы
+            val exp = if (d == today) n else m.perDay
+            expected += exp; taken += n
+            if (n < exp) missed += LocalDate.ofEpochDay(d).format(f) + if (m.perDay > 1) " (${n} из ${m.perDay})" else ""
         }
         if (expected == 0) return null
-        val pct = ((expected - missed.size) * 100.0 / expected).roundToInt()
+        val pct = (taken * 100.0 / expected).roundToInt()
         return buildString {
-            append("Приём отмечен: ${expected - missed.size} из $expected ($pct%).")
+            append("Приём отмечен: $taken из $expected ($pct%).")
             if (missed.isNotEmpty()) {
-                append(" Пропуски: ")
+                append(" Дни с пропусками: ")
                 append(missed.take(40).joinToString(", "))
                 if (missed.size > 40) append(" и ещё ${missed.size - 40}")
                 append(".")

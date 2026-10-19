@@ -100,17 +100,8 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier, onOpenBackup: () -> Unit 
                     Column(Modifier.padding(16.dp)) {
                         Text("Лекарства сегодня", style = MaterialTheme.typography.titleMedium)
                         activeMeds.forEach { med ->
-                            Spacer(Modifier.size(8.dp))
-                            Text("${med.name} ${med.dose}", style = MaterialTheme.typography.bodyMedium)
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                med.slots().forEach { slot ->
-                                    val d = today.toEpochDay()
-                                    DoseChip(med, today, slot,
-                                        logs.firstOrNull { it.medicationId == med.id && it.day == d && it.slot == slot },
-                                        onSet = { vm.setDoseTime(med, d, slot, it) },
-                                        onClear = { vm.clearDose(med, d, slot) })
-                                }
-                            }
+                            Spacer(Modifier.size(6.dp))
+                            DoseRow(med, today, logs, vm)
                         }
                     }
                 }
@@ -199,32 +190,15 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier, onOpenBackup: () -> Unit 
     }
 }
 
-/** Приём лекарств за прошедший день: нажатие — отметить с временем, изменить время или снять отметку. */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+/** Приём лекарств за прошедший день: отмеченные приёмы, пропуски и отметка задним числом. */
 @Composable
 private fun DoseDayBlock(day: LocalDate, meds: List<Medication>, logs: List<DoseLog>, vm: MainViewModel) {
-    val d = day.toEpochDay()
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            meds.forEach { med ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Medication, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.width(6.dp))
-                    Text("${med.name} ${med.dose}".trim(), style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    med.slots().forEach { slot ->
-                        DoseChip(med, day, slot,
-                            logs.firstOrNull { it.medicationId == med.id && it.day == d && it.slot == slot },
-                            onSet = { vm.setDoseTime(med, d, slot, it) },
-                            onClear = { vm.clearDose(med, d, slot) })
-                    }
-                }
-            }
+            meds.forEach { med -> DoseRow(med, day, logs, vm) }
         }
     }
 }

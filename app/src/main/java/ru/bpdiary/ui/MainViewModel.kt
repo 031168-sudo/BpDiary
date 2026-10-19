@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import ru.bpdiary.analysis.AnalysisResult
 import ru.bpdiary.analysis.Analyzer
@@ -102,13 +104,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun saveMedication(m: Medication) = viewModelScope.launch { db.medications().upsert(m) }
     fun deleteMedication(m: Medication) = viewModelScope.launch { db.medications().delete(m) }
 
-    /** Отметить приём с конкретным временем (или изменить время уже отмеченного). */
-    fun setDoseTime(med: Medication, day: Long, slot: String, takenAt: Long) = viewModelScope.launch {
-        db.doseLogs().replace(DoseLog(medicationId = med.id, day = day, slot = slot, takenAt = takenAt))
+    /** Новая отметка приёма за день с фактическим временем. */
+    private val doseLock = Mutex()
+
+    fun addDose(med: Medication, day: Long, takenAt: Long) = viewModelScope.launch {
+        doseLock.withLock {
+            val slot = med.nextSlot(db.doseLogs().all(), day)
+            db.doseLogs().insert(DoseLog(medicationId = med.id, day = day, slot = slot, takenAt = takenAt))
+        }
     }
 
-    fun clearDose(med: Medication, day: Long, slot: String) = viewModelScope.launch {
-        db.doseLogs().remove(med.id, day, slot)
+    /** Поменять время уже отмеченного приёма. */
+    fun editDose(log: DoseLog, takenAt: Long) = viewModelScope.launch {
+        db.doseLogs().replace(log.copy(id = 0, takenAt = takenAt))
+    }
+
+    fun deleteDose(log: DoseLog) = viewModelScope.launch {
+        db.doseLogs().remove(log.medicationId, log.day, log.slot)
     }
 
     suspend fun buildReport(from: LocalDate, to: LocalDate): Uri = withContext(Dispatchers.Default) {

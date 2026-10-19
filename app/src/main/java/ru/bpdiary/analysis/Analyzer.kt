@@ -178,6 +178,10 @@ object Analyzer {
     fun dateOf(m: Measurement): LocalDate = Instant.ofEpochMilli(m.timestamp).atZone(zone).toLocalDate()
     fun dateTimeOf(m: Measurement): LocalDateTime = Instant.ofEpochMilli(m.timestamp).atZone(zone).toLocalDateTime()
 
+    /** Первый день пользования приложением: раньше него приёмы не считаем пропущенными. */
+    fun trackingStart(all: List<Measurement>, logs: List<DoseLog>): Long =
+        (all.map { dateOf(it).toEpochDay() } + logs.map { it.day }).minOrNull() ?: LocalDate.now().toEpochDay()
+
     fun inRange(list: List<Measurement>, from: LocalDate, to: LocalDate) =
         list.filter { val d = dateOf(it); !d.isBefore(from) && !d.isAfter(to) }
 
@@ -403,26 +407,25 @@ object Analyzer {
         val preliminary = effFrom.isAfter(end)
         val treatment = stats(all, if (preliminary) start else effFrom, end, anomalies)
 
-        // приверженность за последние 30 дней приёма
+        // приверженность за последние 30 дней приёма (сегодняшний день ещё не закончен — не считаем)
         val medLogs = logs.filter { it.medicationId == med.id }
-        val slots = med.slots()
-        val adhFrom = maxOf(start, end.minusDays(29))
-        val adhDays = (adhFrom.toEpochDay()..end.toEpochDay())
-        val adherence = if (medLogs.isEmpty()) null else {
-            val expected = adhDays.count() * slots.size
-            val taken = medLogs.count { it.day in adhDays && it.slot in slots }
-            if (expected > 0) taken.toDouble() / expected else null
+        val lastFull = minOf(end, today.minusDays(1))
+        val adhFrom = maxOf(start, lastFull.minusDays(29))
+        val logsByDay = medLogs.groupBy { it.day }
+        fun takenOn(day: Long) = minOf(logsByDay[day]?.size ?: 0, med.perDay)
+        val adherence = if (medLogs.isEmpty() || adhFrom.isAfter(lastFull)) null else {
+            val days = adhFrom.toEpochDay()..lastFull.toEpochDay()
+            val expected = days.count() * med.perDay
+            if (expected > 0) days.sumOf { takenOn(it) }.toDouble() / expected else null
         }
 
         // давление в дни без пропусков vs дни с пропусками (последние 60 дней)
         var takenVsMissed: Pair<Double, Double>? = null
-        if (medLogs.isNotEmpty()) {
-            val byDay = dailyMeans(inRange(all, maxOf(start, end.minusDays(59)), end)).associateBy { it.day.toEpochDay() }
-            val logsByDay = medLogs.groupBy { it.day }
+        if (medLogs.isNotEmpty() && !start.isAfter(lastFull)) {
+            val byDay = dailyMeans(inRange(all, maxOf(start, lastFull.minusDays(59)), lastFull)).associateBy { it.day.toEpochDay() }
             val full = ArrayList<Double>(); val missed = ArrayList<Double>()
             for ((day, dm) in byDay) {
-                val n = logsByDay[day]?.count { it.slot in slots } ?: 0
-                if (n >= slots.size) full += dm.sys else missed += dm.sys
+                if (takenOn(day) >= med.perDay) full += dm.sys else missed += dm.sys
             }
             if (full.size >= 3 && missed.size >= 3) takenVsMissed = full.average() to missed.average()
         }

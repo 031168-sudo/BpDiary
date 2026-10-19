@@ -11,6 +11,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
 import androidx.room.Upsert
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -85,7 +87,7 @@ abstract class DoseLogDao {
 
 @Database(
     entities = [Measurement::class, Medication::class, DoseLog::class],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -94,13 +96,28 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun doseLogs(): DoseLogDao
 
     companion object {
+        /**
+         * v1 → v2: вместо времени приёма — «сколько раз в день».
+         * Число приёмов берём из старого списка времени («08:00, 20:00» → 2). Остальные данные не трогаются.
+         */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE medications ADD COLUMN perDay INTEGER NOT NULL DEFAULT 1")
+                db.execSQL(
+                    "UPDATE medications SET perDay = " +
+                        "max(1, length(trim(times)) - length(replace(trim(times), ',', '')) + 1) " +
+                        "WHERE trim(times) <> ''"
+                )
+            }
+        }
+
         @Volatile private var instance: AppDatabase? = null
 
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
                     context.applicationContext, AppDatabase::class.java, "bp_diary.db"
-                ).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2).build().also { instance = it }
             }
     }
 }

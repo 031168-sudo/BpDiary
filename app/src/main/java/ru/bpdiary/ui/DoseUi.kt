@@ -2,10 +2,18 @@ package ru.bpdiary.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Medication
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
@@ -19,9 +27,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ru.bpdiary.data.DoseLog
 import ru.bpdiary.data.Medication
@@ -29,90 +40,117 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
-private fun slotTime(slot: String): LocalTime? =
-    runCatching { LocalTime.parse(slot.padStart(5, '0'), DateTimeFormatter.ofPattern("HH:mm")) }.getOrNull()
+private val DONE = Color(0xFF2E7D32)
+
+private fun timeOf(log: DoseLog) = Instant.ofEpochMilli(log.takenAt).atZone(ZoneId.systemDefault())
+
+private fun dosesWord(n: Int) = when {
+    n % 10 == 1 && n % 100 != 11 -> "приём"
+    n % 10 in 2..4 && n % 100 !in 12..14 -> "приёма"
+    else -> "приёмов"
+}
 
 /**
- * Кнопка одного приёма. Нажатие открывает выбор: когда принял (сейчас / по графику / другое время),
- * а для уже отмеченного — изменить время или снять отметку.
+ * Приём одного препарата за один день:
+ *  • отмеченные приёмы — «✓ 09:12» (нажатие: изменить время или удалить);
+ *  • пока не все приёмы сделаны — счётчик «осталось 2 из 3» и кнопка «Отметить приём»;
+ *  • когда все сделаны — кнопка исчезает, вместо неё «все приёмы выполнены».
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun DoseChip(
-    med: Medication,
-    day: LocalDate,
-    slot: String,
-    log: DoseLog?,
-    onSet: (takenAt: Long) -> Unit,
-    onClear: () -> Unit,
-) {
-    val zone = ZoneId.systemDefault()
+fun DoseRow(med: Medication, day: LocalDate, logs: List<DoseLog>, vm: MainViewModel) {
     val ctx = LocalContext.current
+    val zone = ZoneId.systemDefault()
     val today = LocalDate.now()
-    var dialog by remember { mutableStateOf(false) }
+    val d = day.toEpochDay()
+    val taken = med.logsOn(logs, d)
+    val remaining = (med.perDay - taken.size).coerceAtLeast(0)
+    var askAdd by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<DoseLog?>(null) }
 
-    val takenAt = log?.let { Instant.ofEpochMilli(it.takenAt).atZone(zone) }
-    val planned = slotTime(slot)
-    val overdue = day.isBefore(today) || (day == today && planned != null && LocalTime.now().isAfter(planned))
-    val label = when {
-        takenAt == null && day.isBefore(today) -> "$slot · пропущено"
-        takenAt == null && overdue -> "$slot · не отмечено"
-        takenAt == null -> slot
-        takenAt.toLocalDate() == day -> "$slot · принял в ${takenAt.format(TIME_FMT)}"
-        else -> "$slot · принял ${takenAt.format(DateTimeFormatter.ofPattern("d MMM HH:mm", RU))}"
+    fun at(t: LocalTime) = day.atTime(t).atZone(zone).toInstant().toEpochMilli()
+    fun addWithPicker() = pickTime(ctx, if (day == today) LocalTime.now() else LocalTime.of(9, 0)) { vm.addDose(med, d, at(it)) }
+
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Medication, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(6.dp))
+            Text("${med.name} ${med.dose}".trim(), style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, false))
+            Text("  · ${med.perDayText()}", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        }
+        if (taken.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            taken.forEach { log ->
+                val t = timeOf(log)
+                FilterChip(
+                    selected = true,
+                    onClick = { editing = log },
+                    label = { Text(if (t.toLocalDate() == day) "принял в ${t.format(TIME_FMT)}" else "принял ${t.format(DATE_FMT)} ${t.format(TIME_FMT)}") },
+                    leadingIcon = { Icon(Icons.Filled.Check, null, Modifier.size(16.dp)) },
+                )
+            }
+        }
+        if (remaining == 0) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.CheckCircle, null, Modifier.size(16.dp), tint = DONE)
+                Text(if (med.perDay == 1) "  Приём выполнен" else "  Все приёмы выполнены",
+                    color = DONE, style = MaterialTheme.typography.bodySmall)
+            }
+        } else if (day == today) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (taken.isEmpty()) "Нужно принять ${med.perDayText().removeSuffix(" в день")} сегодня"
+                    else "Осталось сегодня: $remaining ${dosesWord(remaining)}",
+                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f),
+                )
+                FilledTonalButton(onClick = { askAdd = true }) { Text("Принял") }
+            }
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Пропущено: $remaining из ${med.perDay}", color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                TextButton(onClick = { addWithPicker() }) { Text("Отметить приём") }
+            }
+        }
     }
-    val check: @Composable () -> Unit = { Icon(Icons.Filled.Check, null, Modifier.size(16.dp)) }
-    FilterChip(
-        selected = log != null,
-        onClick = { dialog = true },
-        label = {
-            Text(label, color = when {
-                log != null -> Color.Unspecified
-                day.isBefore(today) -> MaterialTheme.colorScheme.error
-                overdue -> Color(0xFFEF6C00)
-                else -> Color.Unspecified
-            })
+
+    if (askAdd) AlertDialog(
+        onDismissRequest = { askAdd = false },
+        title = { Text(med.name) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Когда приняли?")
+                FilledTonalButton(onClick = { askAdd = false; vm.addDose(med, d, System.currentTimeMillis()) },
+                    modifier = Modifier.fillMaxWidth()) { Text("Сейчас, ${LocalTime.now().format(TIME_FMT)}") }
+                OutlinedButton(onClick = { askAdd = false; addWithPicker() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Указать время…")
+                }
+            }
         },
-        leadingIcon = if (log != null) check else null,
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = { askAdd = false }) { Text("Отмена") } },
     )
 
-    if (dialog) {
-        fun at(t: LocalTime) = day.atTime(t).atZone(zone).toInstant().toEpochMilli()
-        fun pickOther() {
-            val initial = takenAt?.toLocalTime() ?: planned ?: LocalTime.now()
-            pickTime(ctx, initial) { t -> onSet(at(t)) }
-        }
+    editing?.let { log ->
         AlertDialog(
-            onDismissRequest = { dialog = false },
-            title = { Text("${med.name} · $slot") },
+            onDismissRequest = { editing = null },
+            title = { Text(med.name) },
             text = {
-                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        if (log == null) "Когда приняли?" else "Отмечено: ${takenAt!!.format(TIME_FMT)}",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    if (log == null && day == today) FilledTonalButton(
-                        onClick = { dialog = false; onSet(System.currentTimeMillis()) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Сейчас, ${LocalTime.now().format(TIME_FMT)}") }
-                    if (log == null && planned != null && !(day == today && planned.isAfter(LocalTime.now()))) {
-                        val btn: @Composable () -> Unit = { Text("По графику, ${planned.format(TIME_FMT)}") }
-                        if (day == today) OutlinedButton(onClick = { dialog = false; onSet(at(planned)) },
-                            modifier = Modifier.fillMaxWidth()) { btn() }
-                        else FilledTonalButton(onClick = { dialog = false; onSet(at(planned)) },
-                            modifier = Modifier.fillMaxWidth()) { btn() }
-                    }
-                    OutlinedButton(onClick = { dialog = false; pickOther() }, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (log == null) "Указать время…" else "Изменить время…")
-                    }
-                    if (log != null) OutlinedButton(onClick = { dialog = false; onClear() }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Снять отметку (не принимал)", color = MaterialTheme.colorScheme.error)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Отмечен приём в ${timeOf(log).format(TIME_FMT)}")
+                    OutlinedButton(onClick = {
+                        editing = null
+                        pickTime(ctx, timeOf(log).toLocalTime()) { vm.editDose(log, at(it)) }
+                    }, modifier = Modifier.fillMaxWidth()) { Text("Изменить время…") }
+                    OutlinedButton(onClick = { editing = null; vm.deleteDose(log) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Удалить отметку (не принимал)", color = MaterialTheme.colorScheme.error)
                     }
                 }
             },
             confirmButton = {},
-            dismissButton = { TextButton(onClick = { dialog = false }) { Text("Отмена") } },
+            dismissButton = { TextButton(onClick = { editing = null }) { Text("Закрыть") } },
         )
     }
 }

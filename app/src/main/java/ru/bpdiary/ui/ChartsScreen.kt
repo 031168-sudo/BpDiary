@@ -41,10 +41,13 @@ import kotlin.math.roundToInt
 
 private val RANGES = listOf(7 to "7 дней", 30 to "30 дней", 90 to "90 дней", 365 to "Год")
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ChartsScreen(vm: MainViewModel, modifier: Modifier) {
     val list by vm.measurements.collectAsState()
     val meds by vm.medications.collectAsState()
+    val logs by vm.doseLogs.collectAsState()
+    val dark = isSystemInDarkTheme()
     val analysis by vm.analysis.collectAsState()
     var range by rememberSaveable { mutableIntStateOf(1) }
     val days = RANGES[range].first
@@ -98,6 +101,30 @@ fun ChartsScreen(vm: MainViewModel, modifier: Modifier) {
                 }
             }
         }
+        // время приёма лекарств
+        val shownMeds = meds.filter { m ->
+            m.startDay <= today.toEpochDay() && (m.endDay ?: Long.MAX_VALUE) >= from.toEpochDay()
+        }.sortedBy { it.startDay }
+        if (shownMeds.isNotEmpty()) Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp)) {
+                Text("Время приёма лекарств", style = MaterialTheme.typography.titleMedium)
+                val track = Analyzer.trackingStart(list, logs)
+                Canvas(Modifier.fillMaxWidth().height(240.dp)) {
+                    drawIntoCanvas {
+                        ChartRenderer.drawDoses(it.nativeCanvas, RectF(0f, 0f, size.width, size.height),
+                            shownMeds, logs, from, today, track, palette, dark, density)
+                    }
+                }
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    shownMeds.forEachIndexed { i, m -> Dot(Color(ChartRenderer.medColor(i, dark)), m.name) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("×", color = Color(ChartRenderer.MISSED_COLOR), style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.width(4.dp))
+                        Text("пропущен приём", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
         stats?.let { s ->
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -122,6 +149,15 @@ fun StatRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth()) {
         Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value)
+    }
+}
+
+@Composable
+private fun Dot(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(8.dp).background(color, androidx.compose.foundation.shape.CircleShape))
+        Spacer(Modifier.width(4.dp))
+        Text(label, style = MaterialTheme.typography.bodySmall, maxLines = 1)
     }
 }
 

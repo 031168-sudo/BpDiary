@@ -46,6 +46,7 @@ object BackupCodec {
                 put(JSONObject().apply {
                     put("id", m.id); put("name", m.name); put("dose", m.dose); put("times", m.times)
                     put("startDay", m.startDay); put("endDay", m.endDay ?: JSONObject.NULL); put("note", m.note)
+                    put("perDay", m.perDay)
                 })
             }
         })
@@ -84,6 +85,8 @@ object BackupCodec {
                 id = o.getLong("id"), name = o.getString("name"), dose = o.optString("dose"),
                 times = o.optString("times"), startDay = o.getLong("startDay"),
                 endDay = o.optLongOrNull("endDay"), note = o.optString("note"),
+                perDay = if (o.has("perDay")) o.getInt("perDay").coerceIn(1, 12)
+                else o.optString("times").split(',').count { it.isNotBlank() }.coerceAtLeast(1),
             )
         }
         val medIds = meds.map { it.id }.toSet()

@@ -6,7 +6,9 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import ru.bpdiary.analysis.Analyzer
+import ru.bpdiary.data.DoseLog
 import ru.bpdiary.data.Measurement
+import ru.bpdiary.data.Medication
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -36,6 +38,84 @@ object ChartRenderer {
     val DARK = Palette(grid = 0x33FFFFFF, text = 0xFFBBBBBB.toInt(),
         sys = 0xFFEF5350.toInt(), dia = 0xFF64B5F6.toInt(), pulse = 0xFFBA68C8.toInt(),
         target = 0xFF81C784.toInt(), med = 0xFF4DB6AC.toInt())
+
+    /** Цвета препаратов на графике приёма (по порядку). */
+    fun medColor(i: Int, dark: Boolean): Int {
+        val light = intArrayOf(0xFF00897B.toInt(), 0xFF5E35B1.toInt(), 0xFFF57C00.toInt(), 0xFF1E88E5.toInt(), 0xFF6D4C41.toInt(), 0xFFC2185B.toInt())
+        val darkC = intArrayOf(0xFF4DB6AC.toInt(), 0xFF9575CD.toInt(), 0xFFFFB74D.toInt(), 0xFF64B5F6.toInt(), 0xFFA1887F.toInt(), 0xFFF06292.toInt())
+        return (if (dark) darkC else light)[i % light.size]
+    }
+    const val MISSED_COLOR = 0xFFE53935.toInt()
+
+    /**
+     * График времени приёма лекарств: по X — дни, по Y — часы суток (0…24).
+     * Каждый отмеченный приём — точка; день с недобранными приёмами — красный «×» внизу.
+     */
+    fun drawDoses(
+        c: Canvas, area: RectF, meds: List<Medication>, logs: List<DoseLog>,
+        from: LocalDate, to: LocalDate, trackingStart: Long, p: Palette, dark: Boolean, d: Float,
+    ) {
+        val zone = ZoneId.systemDefault()
+        val t0 = from.atStartOfDay(zone).toInstant().toEpochMilli()
+        val t1 = to.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val plot = RectF(area.left + 34 * d, area.top + 8 * d, area.right - 6 * d, area.bottom - 18 * d)
+        fun x(day: Long) = plot.left + (noon(LocalDate.ofEpochDay(day)) - t0).toFloat() / (t1 - t0) * plot.width()
+        fun y(hours: Float) = plot.bottom - hours / 24f * plot.height()
+
+        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.text; textSize = 10 * d }
+        val grid = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.grid; strokeWidth = 1 * d }
+
+        // часы по вертикали
+        text.textAlign = Paint.Align.RIGHT
+        for (h in 0..24 step 3) {
+            c.drawLine(plot.left, y(h.toFloat()), plot.right, y(h.toFloat()), grid)
+            c.drawText("%d:00".format(h), plot.left - 4 * d, y(h.toFloat()) + 3.5f * d, text)
+        }
+        // даты по горизонтали
+        val days = (to.toEpochDay() - from.toEpochDay() + 1).toInt()
+        val ticks = min(days, 6).coerceAtLeast(1)
+        val fmt = DateTimeFormatter.ofPattern("d.MM")
+        text.textAlign = Paint.Align.CENTER
+        for (i in 0 until ticks) {
+            val day = from.plusDays((i.toLong() * (days - 1)) / max(ticks - 1, 1))
+            val tx = x(day.toEpochDay())
+            c.drawLine(tx, plot.top, tx, plot.bottom, grid)
+            c.drawText(day.format(fmt), tx, plot.bottom + 13 * d, text)
+        }
+
+        val r = when { days > 120 -> 1.8f; days > 40 -> 2.6f; else -> 3.6f } * d
+        val fromD = from.toEpochDay(); val toD = to.toEpochDay()
+        val today = LocalDate.now().toEpochDay()
+        var any = false
+        // пропуски
+        val missedDays = HashSet<Long>()
+        meds.forEach { m ->
+            val first = maxOf(fromD, m.startDay, trackingStart)
+            val last = minOf(toD, today - 1, m.endDay ?: Long.MAX_VALUE)
+            for (day in first..last) if (logs.count { it.medicationId == m.id && it.day == day } < m.perDay) missedDays += day
+        }
+        val miss = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = MISSED_COLOR; strokeWidth = 1.6f * d; strokeCap = Paint.Cap.ROUND }
+        val mr = max(r, 2.6f * d)
+        missedDays.forEach { day ->
+            val cx = x(day); val cy = plot.bottom - mr - 1.5f * d
+            c.drawLine(cx - mr, cy - mr, cx + mr, cy + mr, miss)
+            c.drawLine(cx - mr, cy + mr, cx + mr, cy - mr, miss)
+        }
+        // приёмы
+        meds.forEachIndexed { i, m ->
+            val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = medColor(i, dark) }
+            logs.filter { it.medicationId == m.id && it.day in fromD..toD }.forEach { l ->
+                val t = java.time.Instant.ofEpochMilli(l.takenAt).atZone(zone).toLocalTime()
+                val h = t.hour + t.minute / 60f
+                c.drawCircle(x(l.day), y(h), r, dot)
+                any = true
+            }
+        }
+        if (!any && missedDays.isEmpty()) {
+            text.textAlign = Paint.Align.CENTER; text.textSize = 13 * d
+            c.drawText("Нет отметок приёма за период", plot.centerX(), plot.centerY(), text)
+        }
+    }
 
     private data class Pt(val t: Long, val v: Double, val id: Long)
     private class Series(val pts: List<Pt>, val color: Int)
