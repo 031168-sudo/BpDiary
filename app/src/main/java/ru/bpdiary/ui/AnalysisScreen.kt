@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ru.bpdiary.analysis.Analyzer
+import ru.bpdiary.analysis.BpNorms
 import ru.bpdiary.analysis.BpCategory
 import ru.bpdiary.analysis.Comparison
 import ru.bpdiary.analysis.StabilityState
@@ -107,7 +108,7 @@ fun AnalysisScreen(vm: MainViewModel, modifier: Modifier) {
         r.last30?.let { s ->
             Section("Последние 30 дней") {
                 StatRow("Среднее", "${s.sysMean.roundToInt()}/${s.diaMean.roundToInt()}")
-                StatRow("В цели (<135/85)", "${(s.targetShare * 100).roundToInt()}% замеров")
+                StatRow("В цели (${BpNorms.targetText()})", "${(s.targetShare * 100).roundToInt()}% замеров")
                 s.morning?.let { StatRow("Утром", "${it.first.roundToInt()}/${it.second.roundToInt()}") }
                 s.evening?.let { StatRow("Вечером", "${it.first.roundToInt()}/${it.second.roundToInt()}") }
                 val m = s.morning; val e = s.evening

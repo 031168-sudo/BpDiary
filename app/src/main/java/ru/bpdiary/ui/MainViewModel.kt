@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
 import ru.bpdiary.analysis.AnalysisResult
 import ru.bpdiary.analysis.Analyzer
 import ru.bpdiary.data.AppDatabase
+import ru.bpdiary.data.AppSettings
 import ru.bpdiary.data.AutoBackup
 import ru.bpdiary.data.BackupRepo
 import ru.bpdiary.data.Snapshot
@@ -93,8 +94,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         BackupRepo.restore(db, s)
     }
 
+    // ── цель давления ──
+    private val _target = MutableStateFlow(AppSettings.target(app).also { AppSettings.apply(it) })
+    val target: StateFlow<AppSettings.Target> = _target
+
+    fun setTarget(t: AppSettings.Target) {
+        AppSettings.setTarget(getApplication(), t)
+        _target.value = t
+    }
+
     val analysis: StateFlow<AnalysisResult?> =
-        combine(measurements, medications, doseLogs) { m, md, l -> Analyzer.analyze(m, md, l, LocalDate.now()) }
+        combine(measurements, medications, doseLogs, _target) { m, md, l, t ->
+            AppSettings.apply(t)
+            Analyzer.analyze(m, md, l, LocalDate.now())
+        }
             .flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 

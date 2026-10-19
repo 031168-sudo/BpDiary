@@ -114,7 +114,7 @@ object ReportPdf {
             w.kv("Верхнее: мин–макс (разброс)", "${s.sysMin}–${s.sysMax} (±${s.sysSd.roundToInt()})")
             w.kv("Нижнее: мин–макс (разброс)", "${s.diaMin}–${s.diaMax} (±${s.diaSd.roundToInt()})")
             s.pulseMean?.let { w.kv("Средний пульс", "${it.roundToInt()} уд/мин") }
-            w.kv("Замеров в цели (<135/85)", "${(s.targetShare * 100).roundToInt()}%")
+            w.kv("Замеров в цели (${BpNorms.targetText()})", "${(s.targetShare * 100).roundToInt()}%")
             s.morning?.let { w.kv("Утро (4–12 ч), среднее", "${it.first.roundToInt()}/${it.second.roundToInt()}") }
             s.evening?.let { w.kv("Вечер (17–24 ч), среднее", "${it.first.roundToInt()}/${it.second.roundToInt()}") }
             w.kv("Замеров с отклонениями", s.anomalies.toString())
@@ -159,7 +159,7 @@ object ReportPdf {
             w.ensure(220f)
             ChartRenderer.drawBp(w.c, RectF(M, w.y, W - M, w.y + 210f), all, from, to, ids, medStarts, ChartRenderer.LIGHT, 0.9f)
             w.y += 214f
-            w.para("Красная — верхнее, синяя — нижнее, зелёный пунктир — цель 135/85, оранжевые кольца — отклонения, " +
+            w.para("Красная — верхнее, синяя — нижнее, зелёный пунктир — цель ${BpNorms.targetSys}/${BpNorms.targetDia}, оранжевые кольца — отклонения, " +
                 "бирюзовый пунктир — начало приёма препарата.", w.small, 6f)
             w.heading("Пульс")
             w.ensure(140f)
@@ -223,7 +223,7 @@ object ReportPdf {
 
         w.y += 10f
         w.para("Отчёт сформирован приложением по данным самоконтроля и не является медицинским заключением. " +
-            "Категории — по классификации ESC/ESH; цель для домашних измерений — менее 135/85 мм рт. ст.", w.small)
+            "Категории — по классификации ESC/ESH. Цель лечения, заданная в приложении, — менее ${BpNorms.targetSys}/${BpNorms.targetDia} мм рт. ст.", w.small)
         w.finishPage()
 
         val dir = File(ctx.cacheDir, "reports").apply { mkdirs() }

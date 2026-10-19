@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Medication
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -72,6 +73,7 @@ fun App(vm: MainViewModel = viewModel()) {
     BpTheme {
         var tab by rememberSaveable { mutableIntStateOf(0) }
         var showBackup by rememberSaveable { mutableStateOf(false) }
+        var showSettings by rememberSaveable { mutableStateOf(false) }
         val backup by vm.backupStatus.collectAsState()
         val current = Tab.entries[tab]
         Scaffold(
@@ -79,6 +81,7 @@ fun App(vm: MainViewModel = viewModel()) {
                 TopAppBar(
                     title = { Text(if (current == Tab.DIARY) "Давление" else current.title) },
                     actions = {
+                        IconButton(onClick = { showSettings = true }) { Icon(Icons.Filled.Settings, "Настройки") }
                         IconButton(onClick = { showBackup = true }) {
                             Icon(
                                 if (backup.folder == null || backup.error != null) Icons.Filled.CloudOff else Icons.Filled.CloudDone,
@@ -110,6 +113,7 @@ fun App(vm: MainViewModel = viewModel()) {
             }
         }
         if (showBackup) BackupScreen(vm) { showBackup = false }
+        if (showSettings) SettingsScreen(vm) { showSettings = false }
     }
 }
 

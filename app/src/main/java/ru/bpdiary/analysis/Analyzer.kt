@@ -18,7 +18,8 @@ import kotlin.math.sqrt
 // ───────────────────────── Категории давления ─────────────────────────
 // Классификация по рекомендациям ESC/ESH и клиническим рекомендациям МЗ РФ
 // «Артериальная гипертензия у взрослых». Целевое значение для ДОМАШНИХ
-// измерений — < 135/85 мм рт. ст.
+// измерений — < 135/85 мм рт. ст. (это порог диагноза). Цель ЛЕЧЕНИЯ задаётся в настройках,
+// по умолчанию 130/80 (рекомендации МЗ РФ 2024 / ESC 2024: 120–129 / 70–79 при хорошей переносимости).
 
 enum class BpCategory(val title: String, val argb: Long, val rank: Int) {
     HYPOTENSION("Пониженное", 0xFF5C6BC0, -1),
@@ -31,8 +32,14 @@ enum class BpCategory(val title: String, val argb: Long, val rank: Int) {
 }
 
 object BpNorms {
-    const val TARGET_SYS = 135
-    const val TARGET_DIA = 85
+    const val DEFAULT_TARGET_SYS = 130
+    const val DEFAULT_TARGET_DIA = 80
+
+    /** Цель лечения: «в цели» = ниже этих значений. Задаётся в настройках. */
+    @Volatile var targetSys = DEFAULT_TARGET_SYS
+    @Volatile var targetDia = DEFAULT_TARGET_DIA
+
+    fun targetText() = "<$targetSys/$targetDia"
 
     fun classify(sys: Int, dia: Int): BpCategory {
         val s = when {
@@ -56,7 +63,7 @@ object BpNorms {
         return cat
     }
 
-    fun atTarget(sys: Int, dia: Int) = sys < TARGET_SYS && dia < TARGET_DIA && sys >= 90 && dia >= 60
+    fun atTarget(sys: Int, dia: Int) = sys < targetSys && dia < targetDia && sys >= 90 && dia >= 60
 }
 
 // ───────────────────────── Аномалии ─────────────────────────
@@ -291,7 +298,7 @@ object Analyzer {
             slopeW <= -3.0 -> StabilityState.IMPROVING
             slopeW >= 3.0 -> StabilityState.WORSENING
             dsd > 8.0 -> StabilityState.UNSTABLE
-            sysMean < BpNorms.TARGET_SYS && diaMean < BpNorms.TARGET_DIA -> StabilityState.STABLE_AT_TARGET
+            sysMean < BpNorms.targetSys && diaMean < BpNorms.targetDia -> StabilityState.STABLE_AT_TARGET
             else -> StabilityState.STABLE_ABOVE_TARGET
         }
         val since = if (state == StabilityState.STABLE_AT_TARGET || state == StabilityState.STABLE_ABOVE_TARGET)
@@ -308,11 +315,11 @@ object Analyzer {
                 "Средние значения по дням сильно колеблются (разброс ±${dsd.roundToInt()}), в среднем $avg. " +
                     "Проверьте регулярность приёма и условия измерения (покой 5 минут, одна рука, одно время)."
             StabilityState.STABLE_AT_TARGET ->
-                "Среднее за 2 недели $avg — в пределах цели для домашних измерений (<135/85), " +
+                "Среднее за 2 недели $avg — в пределах цели (${BpNorms.targetText()}), " +
                     "колебания небольшие (±${dsd.roundToInt()}).$sinceText"
             StabilityState.STABLE_ABOVE_TARGET ->
-                "Давление ровное (±${dsd.roundToInt()}), но в среднем $avg — выше цели для домашних измерений " +
-                    "(<135/85). Возможно, схему лечения стоит обсудить с врачом.$sinceText"
+                "Давление ровное (±${dsd.roundToInt()}), но в среднем $avg — выше цели " +
+                    "(${BpNorms.targetText()}). Возможно, схему лечения стоит обсудить с врачом.$sinceText"
             StabilityState.INSUFFICIENT -> ""
         }
         return Stability(state, text, sysMean, diaMean, dsd, since)
@@ -367,7 +374,7 @@ object Analyzer {
         }
         add("Среднее верхнее", prev.sysMean, cur.sysMean, i0, "", 3.0, true)
         add("Среднее нижнее", prev.diaMean, cur.diaMean, i0, "", 2.0, true)
-        add("Замеров в цели (<135/85)", prev.targetShare * 100, cur.targetShare * 100, i0, " п.п.", 10.0, false)
+        add("Замеров в цели (${BpNorms.targetText()})", prev.targetShare * 100, cur.targetShare * 100, i0, " п.п.", 10.0, false)
         add("Разброс верхнего (±)", prev.sysSd, cur.sysSd, i0, "", 2.0, true)
         add("Аномалий на 10 замеров", prev.anomalies * 10.0 / prev.count, cur.anomalies * 10.0 / cur.count,
             { String.format(ru, "%.1f", it) }, "", 1.0, true)

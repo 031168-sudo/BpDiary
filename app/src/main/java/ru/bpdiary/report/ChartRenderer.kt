@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import ru.bpdiary.analysis.Analyzer
+import ru.bpdiary.analysis.BpNorms
 import ru.bpdiary.data.DoseLog
 import ru.bpdiary.data.Measurement
 import ru.bpdiary.data.Medication
@@ -54,11 +55,12 @@ object ChartRenderer {
     fun drawDoses(
         c: Canvas, area: RectF, meds: List<Medication>, logs: List<DoseLog>,
         from: LocalDate, to: LocalDate, trackingStart: Long, p: Palette, dark: Boolean, d: Float,
+        highlightDay: Long? = null,
     ) {
         val zone = ZoneId.systemDefault()
         val t0 = from.atStartOfDay(zone).toInstant().toEpochMilli()
         val t1 = to.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-        val plot = RectF(area.left + 34 * d, area.top + 8 * d, area.right - 6 * d, area.bottom - 18 * d)
+        val plot = RectF(area.left + DOSE_LEFT * d, area.top + 8 * d, area.right - 6 * d, area.bottom - 18 * d)
         fun x(day: Long) = plot.left + (noon(LocalDate.ofEpochDay(day)) - t0).toFloat() / (t1 - t0) * plot.width()
         fun y(hours: Float) = plot.bottom - hours / 24f * plot.height()
 
@@ -83,6 +85,12 @@ object ChartRenderer {
             c.drawText(day.format(fmt), tx, plot.bottom + 13 * d, text)
         }
 
+        // выбранный пальцем день — подсветка столбца
+        if (highlightDay != null && highlightDay in from.toEpochDay()..to.toEpochDay()) {
+            val w = max(plot.width() / days, 6f * d)
+            val band = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.text; alpha = 40 }
+            c.drawRect(x(highlightDay) - w / 2, plot.top, x(highlightDay) + w / 2, plot.bottom, band)
+        }
         val r = when { days > 120 -> 1.8f; days > 40 -> 2.6f; else -> 3.6f } * d
         val fromD = from.toEpochDay(); val toD = to.toEpochDay()
         val today = LocalDate.now().toEpochDay()
@@ -117,6 +125,37 @@ object ChartRenderer {
         }
     }
 
+    /** Точка графика давления/пульса: один замер или (на длинных периодах) среднее за день. */
+    data class BpPoint(val t: Long, val sys: Double, val dia: Double, val pulse: Double?, val id: Long, val n: Int)
+
+    const val BP_LEFT = 30f
+    const val DOSE_LEFT = 34f
+
+    fun bpPoints(all: List<Measurement>, from: LocalDate, to: LocalDate): List<BpPoint> {
+        val list = Analyzer.inRange(all, from, to)
+        return if (list.size > 150) Analyzer.dailyMeans(list).map { BpPoint(noon(it.day), it.sys, it.dia, it.pulse, -1, it.n) }
+        else list.map { BpPoint(it.timestamp, it.systolic.toDouble(), it.diastolic.toDouble(), it.pulse?.toDouble(), it.id, 1) }
+            .sortedBy { it.t }
+    }
+
+    fun pulsePoints(all: List<Measurement>, from: LocalDate, to: LocalDate): List<BpPoint> {
+        val list = Analyzer.inRange(all, from, to).filter { it.pulse != null }
+        return if (list.size > 150) Analyzer.dailyMeans(list).filter { it.pulse != null }
+            .map { BpPoint(noon(it.day), it.sys, it.dia, it.pulse, -1, it.n) }
+        else list.map { BpPoint(it.timestamp, it.systolic.toDouble(), it.diastolic.toDouble(), it.pulse!!.toDouble(), it.id, 1) }
+            .sortedBy { it.t }
+    }
+
+    /** Момент времени под пальцем: x — координата на графике шириной width (в пикселях). */
+    fun timeAt(x: Float, width: Float, from: LocalDate, to: LocalDate, d: Float, left: Float): Long {
+        val zone = ZoneId.systemDefault()
+        val t0 = from.atStartOfDay(zone).toInstant().toEpochMilli()
+        val t1 = to.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val l = left * d; val r = width - 6 * d
+        val f = ((x - l) / (r - l)).coerceIn(0f, 1f)
+        return t0 + ((t1 - t0) * f).toLong()
+    }
+
     private data class Pt(val t: Long, val v: Double, val id: Long)
     private class Series(val pts: List<Pt>, val color: Int)
     private class RefLine(val v: Double, val color: Int, val label: String)
@@ -124,39 +163,33 @@ object ChartRenderer {
     fun drawBp(
         c: Canvas, area: RectF, all: List<Measurement>, from: LocalDate, to: LocalDate,
         anomalyIds: Set<Long>, medStarts: List<Pair<LocalDate, String>>, p: Palette, density: Float,
+        targetSys: Int = BpNorms.targetSys, targetDia: Int = BpNorms.targetDia, highlight: Long? = null,
     ) {
-        val list = Analyzer.inRange(all, from, to)
-        val (sys, dia) = if (list.size > 150) {
-            val daily = Analyzer.dailyMeans(list)
-            daily.map { Pt(noon(it.day), it.sys, -1) } to daily.map { Pt(noon(it.day), it.dia, -1) }
-        } else {
-            list.map { Pt(it.timestamp, it.systolic.toDouble(), it.id) } to
-                list.map { Pt(it.timestamp, it.diastolic.toDouble(), it.id) }
-        }
-        val lo = min(dia.minOfOrNull { it.v } ?: 70.0, 70.0) - 5
+        val pts = bpPoints(all, from, to)
+        val sys = pts.map { Pt(it.t, it.sys, it.id) }
+        val dia = pts.map { Pt(it.t, it.dia, it.id) }
+        val lo = min(dia.minOfOrNull { it.v } ?: 70.0, minOf(70.0, targetDia - 5.0)) - 5
         val hi = max(sys.maxOfOrNull { it.v } ?: 150.0, 150.0) + 5
         drawChart(
             c, area, from, to, floor(lo / 10) * 10, ceil(hi / 10) * 10,
-            listOf(Series(sys.sortedBy { it.t }, p.sys), Series(dia.sortedBy { it.t }, p.dia)),
-            listOf(RefLine(135.0, p.target, "135"), RefLine(85.0, p.target, "85")),
-            anomalyIds, medStarts, p, density,
+            listOf(Series(sys, p.sys), Series(dia, p.dia)),
+            listOf(RefLine(targetSys.toDouble(), p.target, ""), RefLine(targetDia.toDouble(), p.target, "")),
+            anomalyIds, medStarts, p, density, highlight,
         )
     }
 
     fun drawPulse(
         c: Canvas, area: RectF, all: List<Measurement>, from: LocalDate, to: LocalDate,
-        p: Palette, density: Float,
+        p: Palette, density: Float, highlight: Long? = null,
     ) {
-        val list = Analyzer.inRange(all, from, to).filter { it.pulse != null }
-        val pts = if (list.size > 150) Analyzer.dailyMeans(list).mapNotNull { d -> d.pulse?.let { Pt(noon(d.day), it, -1) } }
-        else list.map { Pt(it.timestamp, it.pulse!!.toDouble(), it.id) }
+        val pts = pulsePoints(all, from, to).map { Pt(it.t, it.pulse!!, it.id) }
         val lo = min(pts.minOfOrNull { it.v } ?: 50.0, 50.0) - 5
         val hi = max(pts.maxOfOrNull { it.v } ?: 100.0, 100.0) + 5
         drawChart(
             c, area, from, to, floor(lo / 10) * 10, ceil(hi / 10) * 10,
-            listOf(Series(pts.sortedBy { it.t }, p.pulse)),
+            listOf(Series(pts, p.pulse)),
             listOf(RefLine(100.0, p.anomaly, "100"), RefLine(50.0, p.anomaly, "50")),
-            emptySet(), emptyList(), p, density,
+            emptySet(), emptyList(), p, density, highlight,
         )
     }
 
@@ -165,12 +198,12 @@ object ChartRenderer {
     private fun drawChart(
         c: Canvas, area: RectF, from: LocalDate, to: LocalDate, yMin: Double, yMax: Double,
         series: List<Series>, refs: List<RefLine>, anomalyIds: Set<Long>,
-        medStarts: List<Pair<LocalDate, String>>, p: Palette, d: Float,
+        medStarts: List<Pair<LocalDate, String>>, p: Palette, d: Float, highlight: Long? = null,
     ) {
         val zone = ZoneId.systemDefault()
         val t0 = from.atStartOfDay(zone).toInstant().toEpochMilli()
         val t1 = to.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-        val plot = RectF(area.left + 30 * d, area.top + 14 * d, area.right - 6 * d, area.bottom - 18 * d)
+        val plot = RectF(area.left + BP_LEFT * d, area.top + 14 * d, area.right - 6 * d, area.bottom - 18 * d)
         fun x(t: Long) = plot.left + (t - t0).toFloat() / (t1 - t0) * plot.width()
         fun y(v: Double) = plot.bottom - ((v - yMin) / (yMax - yMin)).toFloat() * plot.height()
 
@@ -237,6 +270,19 @@ object ChartRenderer {
             s.pts.forEach { pt ->
                 c.drawCircle(x(pt.t), y(pt.v), r, dot)
                 if (pt.id in anomalyIds) c.drawCircle(x(pt.t), y(pt.v), 5.5f * d, ring)
+            }
+        }
+        // выбранная пальцем точка: вертикальная линия и увеличенные маркеры
+        if (highlight != null && highlight in t0..t1) {
+            val hx = x(highlight)
+            val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.text; strokeWidth = 1.2f * d; alpha = 150 }
+            c.drawLine(hx, plot.top, hx, plot.bottom, line)
+            series.forEach { s ->
+                s.pts.firstOrNull { it.t == highlight }?.let { pt ->
+                    val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = s.color; alpha = 60 }
+                    c.drawCircle(hx, y(pt.v), 10f * d, halo)
+                    c.drawCircle(hx, y(pt.v), 5f * d, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = s.color })
+                }
             }
         }
         if (series.all { it.pts.isEmpty() }) {
