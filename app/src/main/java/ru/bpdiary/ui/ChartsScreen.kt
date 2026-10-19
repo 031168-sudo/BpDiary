@@ -38,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -225,8 +226,11 @@ private fun ChartBox(
     tip: (@Composable () -> Unit)?,
     draw: androidx.compose.ui.graphics.drawscope.DrawScope.(android.graphics.Canvas) -> Unit,
 ) {
+    // Обработчик касаний запускается один раз, поэтому берём из него всегда свежий onTouch —
+    // иначе после смены периода касания уходили в старое, уже не используемое состояние.
+    val currentOnTouch by rememberUpdatedState(onTouch)
     Box(Modifier.fillMaxWidth().height(heightDp.dp)) {
-        Canvas(Modifier.fillMaxWidth().height(heightDp.dp).scrub(onTouch)) {
+        Canvas(Modifier.fillMaxWidth().height(heightDp.dp).scrub { currentOnTouch(it) }) {
             drawIntoCanvas { draw(it.nativeCanvas) }
         }
         if (tip != null && touch != null) {
