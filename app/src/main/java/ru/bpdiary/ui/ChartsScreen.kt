@@ -96,7 +96,6 @@ fun ChartsScreen(vm: MainViewModel, modifier: Modifier) {
     val palette = if (dark) ChartRenderer.DARK else ChartRenderer.LIGHT
     val density = LocalDensity.current.density
     val anomalyIds = analysis?.anomalyIds?.keys ?: emptySet()
-    val medStarts = meds.map { LocalDate.ofEpochDay(it.startDay) to it.name }
     val stats = analysis?.let { Analyzer.stats(list, from, today, it.anomalies) }
 
     // касания графиков (сбрасываются при смене периода)
@@ -135,7 +134,7 @@ fun ChartsScreen(vm: MainViewModel, modifier: Modifier) {
                 Hint()
                 ChartBox(260, bpTouch, { bpTouch = it }, { bpTouch = null }, tip = bpSel?.let { sel -> @Composable { BpTip(sel, list, analysis) } }) {
                     ChartRenderer.drawBp(it, RectF(0f, 0f, size.width, size.height),
-                        list, from, today, anomalyIds, medStarts, palette, density,
+                        list, from, today, anomalyIds, emptyList(), palette, density,
                         target.sys, target.dia, bpSel?.t)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -145,7 +144,6 @@ fun ChartsScreen(vm: MainViewModel, modifier: Modifier) {
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Legend(Color(palette.anomaly), "аномалия")
-                    Legend(Color(palette.med), "начало приёма")
                 }
                 if (days > 90 && list.size > 150) Text("Для длинного периода показаны средние значения по дням",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

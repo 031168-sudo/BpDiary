@@ -153,14 +153,12 @@ object ReportPdf {
 
         // ── графики ──
         if (s != null) {
-            val medStarts = meds.map { LocalDate.ofEpochDay(it.startDay) to it.name }
             val ids = a.anomalyIds.keys
             w.heading("График давления")
             w.ensure(220f)
-            ChartRenderer.drawBp(w.c, RectF(M, w.y, W - M, w.y + 210f), all, from, to, ids, medStarts, ChartRenderer.LIGHT, 0.9f)
+            ChartRenderer.drawBp(w.c, RectF(M, w.y, W - M, w.y + 210f), all, from, to, ids, emptyList(), ChartRenderer.LIGHT, 0.9f)
             w.y += 214f
-            w.para("Красная — верхнее, синяя — нижнее, зелёный пунктир — цель ${BpNorms.targetSys}/${BpNorms.targetDia}, оранжевые кольца — отклонения, " +
-                "бирюзовый пунктир — начало приёма препарата.", w.small, 6f)
+            w.para("Красная — верхнее, синяя — нижнее, зелёный пунктир — цель ${BpNorms.targetSys}/${BpNorms.targetDia}, оранжевые кольца — отклонения.", w.small, 6f)
             w.heading("Пульс")
             w.ensure(140f)
             ChartRenderer.drawPulse(w.c, RectF(M, w.y, W - M, w.y + 130f), all, from, to, ChartRenderer.LIGHT, 0.9f)
