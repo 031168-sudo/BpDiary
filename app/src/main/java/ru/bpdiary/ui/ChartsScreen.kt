@@ -266,7 +266,7 @@ private fun BpTip(sel: ChartRenderer.BpPoint, list: List<ru.bpdiary.data.Measure
             style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold, maxLines = 1)
         sel.pulse?.let { Text("пульс ${it.roundToInt()}", style = MaterialTheme.typography.titleLarge) }
         val cat = BpNorms.classify(sel.sys.roundToInt(), sel.dia.roundToInt())
-        CategoryLabel(cat.title, Color(cat.argb))
+        CategoryLabel(BpNorms.categoryText(sel.sys.roundToInt(), sel.dia.roundToInt()), Color(cat.argb))
         val atTarget = BpNorms.atTarget(sel.sys.roundToInt(), sel.dia.roundToInt())
         Text(if (atTarget) "в цели (${BpNorms.targetText()})" else "выше цели (${BpNorms.targetText()})",
             style = MaterialTheme.typography.bodySmall,

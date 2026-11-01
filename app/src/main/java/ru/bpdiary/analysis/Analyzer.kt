@@ -42,7 +42,38 @@ object BpNorms {
     fun targetText() = "<$targetSys/$targetDia"
 
     fun classify(sys: Int, dia: Int): BpCategory {
-        val s = when {
+        val cat = worse(sysCategory(sys), diaCategory(dia))
+        if (cat.rank < BpCategory.GRADE1.rank && (sys < 90 || dia < 60)) return BpCategory.HYPOTENSION
+        return cat
+    }
+
+    private fun worse(a: BpCategory, b: BpCategory) = if (a.rank >= b.rank) a else b
+
+    /**
+     * Из-за какого числа замер получил свою категорию, например «по нижнему 85».
+     * null — если оба числа дают одну и ту же категорию.
+     */
+    fun categoryReason(sys: Int, dia: Int): String? {
+        val cat = classify(sys, dia)
+        if (cat == BpCategory.HYPOTENSION) return when {
+            sys < 90 && dia < 60 -> null
+            sys < 90 -> "по верхнему $sys"
+            else -> "по нижнему $dia"
+        }
+        val s = sysCategory(sys); val d = diaCategory(dia)
+        return when {
+            s == d -> null
+            s.rank > d.rank -> "по верхнему $sys"
+            else -> "по нижнему $dia"
+        }
+    }
+
+    /** «Высокое нормальное (по нижнему 85)» */
+    fun categoryText(sys: Int, dia: Int): String =
+        classify(sys, dia).title + (categoryReason(sys, dia)?.let { " ($it)" } ?: "")
+
+    private fun sysCategory(sys: Int): BpCategory {
+        return when {
             sys >= 180 -> BpCategory.GRADE3
             sys >= 160 -> BpCategory.GRADE2
             sys >= 140 -> BpCategory.GRADE1
@@ -50,7 +81,10 @@ object BpNorms {
             sys >= 120 -> BpCategory.NORMAL
             else -> BpCategory.OPTIMAL
         }
-        val d = when {
+    }
+
+    private fun diaCategory(dia: Int): BpCategory {
+        return when {
             dia >= 110 -> BpCategory.GRADE3
             dia >= 100 -> BpCategory.GRADE2
             dia >= 90 -> BpCategory.GRADE1
@@ -58,9 +92,6 @@ object BpNorms {
             dia >= 80 -> BpCategory.NORMAL
             else -> BpCategory.OPTIMAL
         }
-        val cat = if (s.rank >= d.rank) s else d
-        if (cat.rank < BpCategory.GRADE1.rank && (sys < 90 || dia < 60)) return BpCategory.HYPOTENSION
-        return cat
     }
 
     fun atTarget(sys: Int, dia: Int) = sys < targetSys && dia < targetDia && sys >= 90 && dia >= 60

@@ -143,7 +143,7 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier, onOpenBackup: () -> Unit 
                                 Text("${last.systolic}/${last.diastolic}", fontSize = 40.sp, fontWeight = FontWeight.Bold)
                                 last.pulse?.let { Text("  пульс $it", style = MaterialTheme.typography.titleMedium) }
                             }
-                            CategoryLabel(cat.title, Color(cat.argb))
+                            CategoryLabel(BpNorms.categoryText(last.systolic, last.diastolic), Color(cat.argb))
                             analysis?.last7?.let {
                                 Spacer(Modifier.size(8.dp))
                                 Text("Среднее за 7 дней: ${it.sysMean.roundToInt()}/${it.diaMean.roundToInt()}" +
@@ -292,7 +292,7 @@ fun MeasurementDialog(
         }
         if (s != null && d != null && error == null) {
             val cat = BpNorms.classify(s, d)
-            CategoryLabel(cat.title, Color(cat.argb))
+            CategoryLabel(BpNorms.categoryText(s, d), Color(cat.argb))
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
