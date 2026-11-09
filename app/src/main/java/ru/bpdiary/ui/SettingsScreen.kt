@@ -9,6 +9,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,10 +24,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import ru.bpdiary.analysis.BpNorms
+import ru.bpdiary.ble.TonometerLink
 import ru.bpdiary.data.AppSettings
 
 @Composable
-fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
+fun SettingsScreen(vm: MainViewModel, onOpenTonometer: () -> Unit, onClose: () -> Unit) {
     val current by vm.target.collectAsState()
     var sys by remember { mutableStateOf(current.sys.toString()) }
     var dia by remember { mutableStateOf(current.dia.toString()) }
@@ -45,6 +47,17 @@ fun SettingsScreen(vm: MainViewModel, onClose: () -> Unit) {
         onDismiss = onClose,
         onSave = { vm.setTarget(AppSettings.Target(s!!, d!!)); onClose() },
     ) {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Тонометр", style = MaterialTheme.typography.titleMedium)
+                val tState by TonometerLink.state.collectAsState()
+                Text(TonometerLink.deviceName()?.let { "$it — ${tState.title.lowercase()}" }
+                    ?: "Замеры с тонометра по Bluetooth будут попадать в дневник сами.")
+                OutlinedButton(onClick = onOpenTonometer) {
+                    Text(if (TonometerLink.deviceName() == null) "Подключить тонометр" else "Настроить подключение")
+                }
+            }
+        }
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Цель давления", style = MaterialTheme.typography.titleMedium)

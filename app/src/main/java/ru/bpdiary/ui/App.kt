@@ -74,6 +74,7 @@ fun App(vm: MainViewModel = viewModel()) {
         var tab by rememberSaveable { mutableIntStateOf(0) }
         var showBackup by rememberSaveable { mutableStateOf(false) }
         var showSettings by rememberSaveable { mutableStateOf(false) }
+        var showTonometer by rememberSaveable { mutableStateOf(false) }
         val backup by vm.backupStatus.collectAsState()
         val current = Tab.entries[tab]
         Scaffold(
@@ -113,7 +114,8 @@ fun App(vm: MainViewModel = viewModel()) {
             }
         }
         if (showBackup) BackupScreen(vm) { showBackup = false }
-        if (showSettings) SettingsScreen(vm) { showSettings = false }
+        if (showSettings) SettingsScreen(vm, onOpenTonometer = { showTonometer = true }) { showSettings = false }
+        if (showTonometer) TonometerScreen { showTonometer = false }
     }
 }
 

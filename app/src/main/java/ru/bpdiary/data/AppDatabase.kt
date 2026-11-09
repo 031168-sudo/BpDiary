@@ -29,6 +29,9 @@ interface MeasurementDao {
     @Query("SELECT * FROM measurements ORDER BY timestamp")
     suspend fun all(): List<Measurement>
 
+    @Query("SELECT COUNT(*) FROM measurements WHERE systolic = :sys AND diastolic = :dia AND timestamp BETWEEN :from AND :to")
+    suspend fun countSimilar(sys: Int, dia: Int, from: Long, to: Long): Int
+
     @Insert
     suspend fun insertAll(list: List<Measurement>)
 
