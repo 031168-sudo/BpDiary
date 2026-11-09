@@ -60,6 +60,7 @@ fun TonometerScreen(onClose: () -> Unit) {
     val scanning by TonometerLink.scanning.collectAsState()
     val log by TonometerLink.log.collectAsState()
     val last by TonometerLink.lastReading.collectAsState()
+    val info by TonometerLink.info.collectAsState()
     var userFilter by remember { mutableIntStateOf(TonometerLink.userFilter()) }
     var showLog by remember { mutableStateOf(false) }
     // имя тонометра перечитываем при смене состояния (после выбора/отвязки)
@@ -98,6 +99,14 @@ fun TonometerScreen(onClose: () -> Unit) {
                                 Text("  ${state.title}", fontWeight = FontWeight.SemiBold, color = tint)
                             }
                             deviceName?.let { Text("Тонометр: $it") }
+                            listOfNotNull(info.manufacturer, info.model).takeIf { it.isNotEmpty() }?.let {
+                                Text(it.joinToString(" "), style = MaterialTheme.typography.bodySmall)
+                            }
+                            info.battery?.let { Text("Батарея тонометра: $it%") }
+                            info.features?.let { f ->
+                                Text("Тонометр сообщает о: " + (listOf("давлении и пульсе") + f.filterNot { it.startsWith("несколько") }).joinToString(", "),
+                                    style = MaterialTheme.typography.bodySmall)
+                            }
                             last?.let { Text("Последний полученный замер: $it") }
                             when (state) {
                                 TonometerLink.State.NO_PERMISSION -> Button(onClick = { askPerms.launch(TonometerLink.requiredPermissions()) }) {

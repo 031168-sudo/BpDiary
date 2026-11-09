@@ -58,6 +58,14 @@ object TonometerLink {
     private val CTS = uuid16(0x1805)
     private val CURRENT_TIME = uuid16(0x2A2B)
     private val CCCD = uuid16(0x2902)
+    private val CUFF = uuid16(0x2A36)
+    private val BP_FEATURE = uuid16(0x2A49)
+    private val BATTERY = uuid16(0x2A19)
+    private val MANUFACTURER = uuid16(0x2A29)
+    private val MODEL = uuid16(0x2A24)
+    private val FIRMWARE = uuid16(0x2A26)
+    /** Фирменные службы Rossmax — слушаем их для журнала (там могут быть, например, данные о мерцательной аритмии). */
+    private val VENDOR_SERVICES = setOf(uuid16(0xFDF2), uuid16(0x1210))
 
     enum class State(val title: String) {
         NO_DEVICE("Тонометр не выбран"),
@@ -85,6 +93,28 @@ object TonometerLink {
     val scanning: StateFlow<Boolean> = _scanning
     private val _lastReading = MutableStateFlow<String?>(null)
     val lastReading: StateFlow<String?> = _lastReading
+
+    /** Окно «идёт замер»: давление в манжете в реальном времени, затем результат. */
+    data class Live(
+        val cuff: Int? = null,
+        val result: BleReading? = null,
+        val aborted: Boolean = false,
+        val history: List<Int> = emptyList(),
+    )
+    private val _live = MutableStateFlow<Live?>(null)
+    val live: StateFlow<Live?> = _live
+    fun dismissLive() { main.removeCallbacks(abortLive); _live.value = null }
+    private val abortLive = Runnable {
+        val l = _live.value
+        if (l != null && l.result == null) _live.value = l.copy(aborted = true)
+    }
+
+    data class Info(
+        val manufacturer: String? = null, val model: String? = null, val firmware: String? = null,
+        val battery: Int? = null, val features: List<String>? = null,
+    )
+    private val _info = MutableStateFlow(Info())
+    val info: StateFlow<Info> = _info
 
     private var gatt: BluetoothGatt? = null
     private val ops = ArrayDeque<() -> Unit>()
@@ -273,7 +303,21 @@ object TonometerLink {
             standardProfile = bp != null
             if (bp != null) {
                 log("Стандартный профиль тонометра найден")
+                // сведения о тонометре
+                listOf(MANUFACTURER, MODEL, FIRMWARE, BP_FEATURE, BATTERY).forEach { u ->
+                    g.services.firstNotNullOfOrNull { it.getCharacteristic(u) }
+                        ?.takeIf { it.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0 }
+                        ?.let { c -> ops += { if (!g.readCharacteristic(c)) nextOp() } }
+                }
                 ops += { subscribe(g, bp) }
+                g.getService(BPS)?.getCharacteristic(CUFF)?.let { c -> ops += { subscribe(g, c) } }
+                g.services.firstNotNullOfOrNull { it.getCharacteristic(BATTERY) }
+                    ?.takeIf { it.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0 }
+                    ?.let { c -> ops += { subscribe(g, c) } }
+                // фирменные каналы — только для журнала
+                g.services.filter { it.uuid in VENDOR_SERVICES }.flatMap { it.characteristics }
+                    .filter { it.properties and (BluetoothGattCharacteristic.PROPERTY_NOTIFY or BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0 }
+                    .forEach { c -> ops += { subscribe(g, c) } }
             } else {
                 log("Стандартного профиля нет — подписываюсь на все уведомления для диагностики")
                 g.services.flatMap { it.characteristics }
@@ -295,6 +339,15 @@ object TonometerLink {
                 }
             }
             nextOp()
+        }
+
+        @Deprecated("API < 33")
+        override fun onCharacteristicRead(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) {
+            @Suppress("DEPRECATION") handleRead(c.uuid, c.value ?: ByteArray(0), status)
+        }
+
+        override fun onCharacteristicRead(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
+            handleRead(c.uuid, value, status)
         }
 
         override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) {
@@ -341,7 +394,37 @@ object TonometerLink {
     }
 
     // ── данные ──
+    private fun handleRead(u: UUID, v: ByteArray, status: Int) {
+        if (status == BluetoothGatt.GATT_SUCCESS) {
+            val text = v.toString(Charsets.UTF_8).trim { it <= ' ' }
+            when (u) {
+                MANUFACTURER -> { _info.value = _info.value.copy(manufacturer = text); log("Производитель: $text") }
+                MODEL -> { _info.value = _info.value.copy(model = text); log("Модель: $text") }
+                FIRMWARE -> { _info.value = _info.value.copy(firmware = text); log("Прошивка: $text") }
+                BATTERY -> v.firstOrNull()?.let { val pct = it.toInt() and 0xFF
+                    _info.value = _info.value.copy(battery = pct); log("Батарея: $pct%") }
+                BP_FEATURE -> { val f = BpParser.parseFeature(v)
+                    _info.value = _info.value.copy(features = f)
+                    log("Умеет определять: " + f.ifEmpty { listOf("ничего дополнительно") }.joinToString(", ") + " (${BpParser.hex(v)})") }
+                else -> log("Чтение ${short(u)}: ${BpParser.hex(v)}")
+            }
+        } else log("Чтение ${short(u)}: ошибка $status")
+        nextOp()
+    }
+
     private fun handleData(u: UUID, v: ByteArray) {
+        when (u) {
+            CUFF -> {
+                val p = BpParser.parseCuff(v) ?: return
+                val prev = _live.value?.takeIf { it.result == null && !it.aborted }
+                if (prev == null) log("Начался замер")
+                _live.value = Live(cuff = p, history = ((prev?.history ?: emptyList()) + p).takeLast(300))
+                main.removeCallbacks(abortLive)
+                main.postDelayed(abortLive, 15_000)
+                return
+            }
+            BATTERY -> { v.firstOrNull()?.let { _info.value = _info.value.copy(battery = it.toInt() and 0xFF) }; return }
+        }
         log("Данные ${short(u)}: ${BpParser.hex(v)}")
         if (u != BP_MEASUREMENT) return
         val r = BpParser.parse(v) ?: run { log("Не удалось разобрать замер"); return }
@@ -349,6 +432,15 @@ object TonometerLink {
         if (filter != 0 && r.userId != null && r.userId != filter) {
             log("Замер пользователя ${r.userId} пропущен (принимаются только замеры пользователя $filter)")
             return
+        }
+        if (r.warnings.isNotEmpty() || r.irregular)
+            log("Предупреждения: " + (listOfNotNull("аритмия".takeIf { r.irregular }) + r.warnings).joinToString(", "))
+        // результат показываем в окне, если замер шёл сейчас или сделан только что (не старые из памяти тонометра)
+        val fresh = _live.value != null || r.time == null ||
+            Duration.between(r.time, LocalDateTime.now()).abs().toMinutes() < 10
+        if (fresh) {
+            main.removeCallbacks(abortLive)
+            _live.value = (_live.value ?: Live()).copy(result = r, aborted = false)
         }
         save(r)
     }
@@ -364,8 +456,9 @@ object TonometerLink {
             log("Замер ${r.systolic}/${r.diastolic} уже есть в дневнике")
             return@launch
         }
+        val note = if (r.warnings.isEmpty()) "" else "Тонометр: " + r.warnings.joinToString(", ")
         dao.upsert(Measurement(timestamp = ts, systolic = r.systolic, diastolic = r.diastolic, pulse = r.pulse,
-            irregular = r.irregular, note = ""))
+            irregular = r.irregular, note = note))
         val txt = "${r.systolic}/${r.diastolic}" + (r.pulse?.let { ", пульс $it" } ?: "") +
             (r.userId?.let { " (пользователь $it)" } ?: "")
         log("Сохранён замер $txt")

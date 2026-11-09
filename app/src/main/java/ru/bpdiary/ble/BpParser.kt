@@ -13,6 +13,8 @@ data class BleReading(
     val time: LocalDateTime?,
     val userId: Int?,
     val irregular: Boolean,
+    /** Предупреждения тонометра из поля «статус замера» (кроме аритмии — она в irregular). */
+    val warnings: List<String> = emptyList(),
 )
 
 /**
@@ -59,15 +61,46 @@ object BpParser {
             i += 1
         }
         var irregular = false
+        val warnings = ArrayList<String>()
         if (hasStatus && need(2)) {
-            irregular = u16(b, i) and 0x0004 != 0
+            val st = u16(b, i)
+            irregular = st and 0x0004 != 0
+            if (st and 0x0001 != 0) warnings += "движение во время замера"
+            if (st and 0x0002 != 0) warnings += "манжета надета слишком свободно"
+            when ((st shr 3) and 0x03) {
+                1 -> warnings += "пульс выше допустимого диапазона"
+                2 -> warnings += "пульс ниже допустимого диапазона"
+            }
+            if (st and 0x0020 != 0) warnings += "неправильное положение при замере"
         }
 
         val k = if (kpa) KPA_TO_MMHG else 1.0
         val s = (sys * k).roundToInt()
         val d = (dia * k).roundToInt()
         if (s !in 40..300 || d !in 20..200) return null
-        return BleReading(s, d, pulse, time, user, irregular)
+        return BleReading(s, d, pulse, time, user, irregular, warnings)
+    }
+
+    /** Промежуточное давление в манжете во время замера (0x2A36), мм рт. ст. */
+    fun parseCuff(b: ByteArray): Int? {
+        if (b.size < 3) return null
+        val kpa = (b[0].toInt() and 0x01) != 0
+        val v = sfloat(b, 1) ?: return null
+        return (v * if (kpa) KPA_TO_MMHG else 1.0).roundToInt().takeIf { it in 0..320 }
+    }
+
+    /** Что умеет определять тонометр (0x2A49, Blood Pressure Feature). */
+    fun parseFeature(b: ByteArray): List<String> {
+        if (b.size < 2) return emptyList()
+        val f = u16(b, 0)
+        return buildList {
+            if (f and 0x01 != 0) add("движение во время замера")
+            if (f and 0x02 != 0) add("правильность надевания манжеты")
+            if (f and 0x04 != 0) add("нерегулярный пульс (аритмия)")
+            if (f and 0x08 != 0) add("пульс вне диапазона")
+            if (f and 0x10 != 0) add("положение при замере")
+            if (f and 0x20 != 0) add("несколько сопряжённых телефонов")
+        }
     }
 
     private fun u16(b: ByteArray, i: Int) = (b[i].toInt() and 0xFF) or ((b[i + 1].toInt() and 0xFF) shl 8)
