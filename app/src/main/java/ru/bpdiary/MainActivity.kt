@@ -15,6 +15,17 @@ class MainActivity : ComponentActivity() {
         setContent { App() }
     }
 
+    // Тонометр слушаем только пока приложение на экране
+    override fun onStart() {
+        super.onStart()
+        TonometerLink.setActive(true)
+    }
+
+    override fun onStop() {
+        TonometerLink.setActive(false)
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         TonometerLink.restart() // например, после выдачи разрешений или включения Bluetooth

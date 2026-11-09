@@ -39,6 +39,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.time.LocalDate
 import java.time.LocalTime
@@ -120,6 +122,13 @@ fun App(vm: MainViewModel = viewModel()) {
         // окно «идёт замер» поверх любого экрана
         val live by TonometerLink.live.collectAsState()
         live?.let { LiveMeasureDialog(it) }
+        // пока идёт замер — экран не гаснет
+        val measuring by TonometerLink.measuring.collectAsState()
+        val view = LocalView.current
+        DisposableEffect(measuring) {
+            view.keepScreenOn = measuring
+            onDispose { view.keepScreenOn = false }
+        }
     }
 }
 

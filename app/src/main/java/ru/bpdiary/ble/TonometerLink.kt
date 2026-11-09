@@ -42,9 +42,10 @@ import java.util.UUID
 /**
  * Связь с тонометром по Bluetooth Low Energy.
  *
- * Тонометр включает Bluetooth на несколько секунд после замера. Приложение держит «ожидающее»
- * подключение (autoConnect) к выбранному тонометру, поэтому как только он появится — Android
- * подключится сам, приложение включит приём и сохранит присланные замеры в дневник.
+ * Работает ТОЛЬКО пока приложение на экране (setActive из MainActivity.onStart/onStop):
+ * в фоне связь полностью закрывается. В дневник попадает только замер, который идёт прямо сейчас —
+ * перед результатом должно прийти давление в манжете (0x2A36). Старые замеры из памяти тонометра
+ * пропускаются.
  *
  * Если тонометр работает по стандартному профилю Bluetooth для тонометров (Blood Pressure Service),
  * замеры разбираются автоматически. Если нет — всё, что он присылает, пишется в журнал,
@@ -107,6 +108,8 @@ object TonometerLink {
     private val abortLive = Runnable {
         val l = _live.value
         if (l != null && l.result == null) _live.value = l.copy(aborted = true)
+        setMeasuring(false)
+        lastCuffAt = 0
     }
 
     data class Info(
@@ -119,6 +122,38 @@ object TonometerLink {
     private var gatt: BluetoothGatt? = null
     private val ops = ArrayDeque<() -> Unit>()
     private var standardProfile = false
+    /** Приложение на экране. Только тогда держим связь и принимаем замеры. */
+    private var active = false
+    /** Умеет ли тонометр присылать давление в манжете по ходу замера. */
+    private var hasCuff = false
+    /** Когда последний раз пришло давление в манжете (признак, что замер идёт сейчас). */
+    @Volatile private var lastCuffAt = 0L
+
+    /** Идёт замер: экран телефона не должен гаснуть. */
+    private val _measuring = MutableStateFlow(false)
+    val measuring: StateFlow<Boolean> = _measuring
+    private val measuringTimeout = Runnable { _measuring.value = false }
+    private fun setMeasuring(on: Boolean) {
+        main.removeCallbacks(measuringTimeout)
+        _measuring.value = on
+        // страховка: экран не держим включённым дольше 3 минут без результата
+        if (on) main.postDelayed(measuringTimeout, 180_000)
+    }
+
+    /** Вызывается из MainActivity: true — приложение на экране, false — свёрнуто/закрыто. */
+    fun setActive(a: Boolean) {
+        if (!::app.isInitialized) return
+        active = a
+        if (a) restart()
+        else {
+            stopScan()
+            closeGatt()
+            dismissLive()
+            setMeasuring(false)
+            lastCuffAt = 0
+            log("Приложение свёрнуто — связь с тонометром закрыта")
+        }
+    }
 
     // ── настройки ──
     private fun prefs() = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -159,7 +194,6 @@ object TonometerLink {
             addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
         }
         ContextCompat.registerReceiver(app, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
-        restart()
     }
 
     /** Пересчитать состояние и, если всё готово, начать ждать тонометр. */
@@ -167,6 +201,7 @@ object TonometerLink {
         if (!::app.isInitialized) return
         val addr = deviceAddress()
         when {
+            !active -> closeGatt()
             addr == null -> { closeGatt(); _state.value = State.NO_DEVICE }
             !hasPermissions() -> { closeGatt(); _state.value = State.NO_PERMISSION }
             !bluetoothOn() -> { closeGatt(); _state.value = State.BT_OFF }
@@ -265,11 +300,13 @@ object TonometerLink {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 _state.value = State.CONNECTED
+                setMeasuring(true) // тонометр выходит на связь, когда начинает замер — экран не гасим
                 log("Подключено (статус $status), ищу службы…")
                 main.postDelayed({ g.discoverServices() }, 600)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 log("Отключено (статус $status)")
                 ops.clear()
+                if (_live.value?.let { it.result == null } != false) setMeasuring(false)
                 main.post {
                     if (gatt !== g) return@post
                     if (status == 133 || status == 8 || status == 62) {
@@ -310,6 +347,7 @@ object TonometerLink {
                         ?.let { c -> ops += { if (!g.readCharacteristic(c)) nextOp() } }
                 }
                 ops += { subscribe(g, bp) }
+                hasCuff = g.getService(BPS)?.getCharacteristic(CUFF) != null
                 g.getService(BPS)?.getCharacteristic(CUFF)?.let { c -> ops += { subscribe(g, c) } }
                 g.services.firstNotNullOfOrNull { it.getCharacteristic(BATTERY) }
                     ?.takeIf { it.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0 }
@@ -418,6 +456,8 @@ object TonometerLink {
                 val p = BpParser.parseCuff(v) ?: return
                 val prev = _live.value?.takeIf { it.result == null && !it.aborted }
                 if (prev == null) log("Начался замер")
+                lastCuffAt = System.currentTimeMillis()
+                setMeasuring(true)
                 _live.value = Live(cuff = p, history = ((prev?.history ?: emptyList()) + p).takeLast(300))
                 main.removeCallbacks(abortLive)
                 main.postDelayed(abortLive, 15_000)
@@ -435,21 +475,26 @@ object TonometerLink {
         }
         if (r.warnings.isNotEmpty() || r.irregular)
             log("Предупреждения: " + (listOfNotNull("аритмия".takeIf { r.irregular }) + r.warnings).joinToString(", "))
-        // результат показываем в окне, если замер шёл сейчас или сделан только что (не старые из памяти тонометра)
-        val fresh = _live.value != null || r.time == null ||
-            Duration.between(r.time, LocalDateTime.now()).abs().toMinutes() < 10
-        if (fresh) {
-            main.removeCallbacks(abortLive)
-            _live.value = (_live.value ?: Live()).copy(result = r, aborted = false)
+        // В дневник — только замер, сделанный прямо сейчас: перед ним шло давление в манжете.
+        // Если тонометр не умеет присылать давление в манжете — замер должен быть не старше 2 минут по его часам.
+        val liveNow = if (hasCuff) System.currentTimeMillis() - lastCuffAt < 180_000
+        else r.time != null && Duration.between(r.time, LocalDateTime.now()).abs().toMinutes() < 2
+        if (!liveNow) {
+            log("Замер ${r.systolic}/${r.diastolic} — старый, из памяти тонометра. Пропущен.")
+            return
         }
+        lastCuffAt = 0 // следующий результат без нового замера уже не примем
+        main.removeCallbacks(abortLive)
+        _live.value = (_live.value ?: Live()).copy(result = r, aborted = false)
+        setMeasuring(false)
         save(r)
     }
 
     private fun save(r: BleReading) = io.launch {
         val zone = ZoneId.systemDefault()
         val now = LocalDateTime.now()
-        // время тонометра берём, если оно правдоподобное; иначе (часы не выставлены) — текущее
-        val t = r.time?.takeIf { Duration.between(it, now).let { d -> d.toDays() < 730 && d.toMinutes() > -10 } } ?: now
+        // замер сделан только что — ставим время телефона (часы тонометра могут уходить)
+        val t = now
         val ts = t.atZone(zone).toInstant().toEpochMilli()
         val dao = AppDatabase.get(app).measurements()
         if (dao.countSimilar(r.systolic, r.diastolic, ts - 120_000, ts + 120_000) > 0) {
