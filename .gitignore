@@ -5,3 +5,10 @@ local.properties
 .idea/
 *.iml
 .DS_Store
+
+# ключи подписи в репозиторий не попадают: в CI берутся из Secrets
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key

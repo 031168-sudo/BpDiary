@@ -17,13 +17,18 @@ android {
         versionName = "2.2"
     }
 
-    // Постоянный ключ, чтобы каждая новая сборка ставилась поверх старой без потери данных
+    // Постоянный ключ, чтобы каждая новая сборка ставилась поверх старой без потери данных.
+    // Сам файл в репозитории не хранится: локально лежит в app/debug.keystore,
+    // в CI подкладывается из секрета ANDROID_KEYSTORE_BASE64.
     signingConfigs {
         getByName("debug") {
-            storeFile = file("debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            val ks = file("debug.keystore")
+            if (ks.exists()) {
+                storeFile = ks
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
     }
 
