@@ -21,8 +21,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Medication
@@ -35,7 +33,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -44,10 +41,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -85,14 +80,13 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier, onOpenBackup: () -> Unit 
     var adding by remember { mutableStateOf(false) }
 
     val today = LocalDate.now()
-    // Какой день показываем в карточке лекарств: по умолчанию сегодня, можно выбрать любой.
-    var medDayEpoch by rememberSaveable { mutableLongStateOf(today.toEpochDay()) }
-    val medDay = LocalDate.ofEpochDay(medDayEpoch)
+    val activeMeds = meds.filter { it.isActiveOn(today.toEpochDay()) }
     val grouped = list.groupBy { Analyzer.dateOf(it) }
-    // Дни, где показываем приём лекарств: с первого дня пользования приложением (не раньше 60 дней назад)
+    // Дни, где показываем приём лекарств: с начала лечения (или первого замера), без ограничения по глубине,
+    // чтобы забытую отметку можно было дозаписать в любой день.
     val trackingStart = (list.map { Analyzer.dateOf(it).toEpochDay() } + logs.map { it.day } + meds.map { it.startDay })
         .minOrNull() ?: today.toEpochDay()
-    val doseDays = (maxOf(trackingStart, today.minusDays(60).toEpochDay()) until today.toEpochDay())
+    val doseDays = (trackingStart until today.toEpochDay())
         .filter { d -> meds.any { it.isActiveOn(d) } }
         .map { LocalDate.ofEpochDay(it) }
     val allDays = (grouped.keys + doseDays + today).toSortedSet(compareByDescending { it })
@@ -102,9 +96,17 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier, onOpenBackup: () -> Unit 
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // приём лекарств за выбранный день (по умолчанию — сегодня)
-            if (meds.isNotEmpty()) item(key = "meds") {
-                MedsDayCard(meds, medDay, logs, vm) { medDayEpoch = it.toEpochDay() }
+            // приём лекарств сегодня
+            if (activeMeds.isNotEmpty()) item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Лекарства сегодня", style = MaterialTheme.typography.titleMedium)
+                        activeMeds.forEach { med ->
+                            Spacer(Modifier.size(6.dp))
+                            DoseRow(med, today, logs, vm)
+                        }
+                    }
+                }
             }
             // напоминание о резервной копии
             if (list.isNotEmpty() && (backup.folder == null || backup.error != null)) item {
@@ -168,7 +170,7 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier, onOpenBackup: () -> Unit 
                         color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
                 }
                 if (dayMeds.isNotEmpty()) item(key = "d$day") {
-                    DoseDayBlock(day, dayMeds, logs, vm)
+                    DoseDayBlock(day, dayMeds, meds, logs, vm)
                 }
                 items(dayItems, key = { it.id }) { m ->
                     MeasurementRow(m, analysis?.anomalyIds?.containsKey(m.id) == true) { editing = m }
@@ -192,71 +194,26 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier, onOpenBackup: () -> Unit 
     }
 }
 
-/**
- * Карточка лекарств за выбранный день: стрелки и календарь для любого дня,
- * отметки приёма и «вне плана» — даже если норма за день уже выполнена.
- */
+/** Приём лекарств за прошедший день: отмеченные приёмы, пропуски, отметка задним числом и приём вне плана. */
 @Composable
-private fun MedsDayCard(
-    meds: List<Medication>,
+private fun DoseDayBlock(
     day: LocalDate,
+    dayMeds: List<Medication>,
+    allMeds: List<Medication>,
     logs: List<DoseLog>,
     vm: MainViewModel,
-    onDayChange: (LocalDate) -> Unit,
 ) {
-    val ctx = LocalContext.current
-    val today = LocalDate.now()
-    val d = day.toEpochDay()
-    val dayMeds = meds.filter { it.isActiveOn(d) || it.logsOn(logs, d).isNotEmpty() }
     var pickMed by remember { mutableStateOf(false) }
-
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Лекарства", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.weight(1f))
-                IconButton(onClick = { onDayChange(day.minusDays(1)) }) {
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Предыдущий день")
-                }
-                TextButton(
-                    onClick = { pickDate(ctx, day) { onDayChange(if (it > today) today else it) } },
-                    contentPadding = PaddingValues(horizontal = 8.dp),
-                ) { Text(compactDayLabel(day, today), maxLines = 1) }
-                IconButton(onClick = { onDayChange(day.plusDays(1)) }, enabled = day < today) {
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Следующий день")
-                }
-            }
-            if (dayMeds.isEmpty()) {
-                Text(
-                    "В этот день препаратов по плану не было",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            dayMeds.forEach { med ->
-                Spacer(Modifier.size(6.dp))
-                DoseRow(med, day, logs, vm)
-            }
-            TextButton(onClick = { pickMed = true }, modifier = Modifier.padding(start = 0.dp)) {
-                Text("+ Приём препарата")
-            }
-        }
-    }
-
-    if (pickMed) DosePickDialog(meds, day, vm) { pickMed = false }
-}
-
-/** Приём лекарств за прошедший день: отмеченные приёмы, пропуски и отметка задним числом. */
-@Composable
-private fun DoseDayBlock(day: LocalDate, meds: List<Medication>, logs: List<DoseLog>, vm: MainViewModel) {
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            meds.forEach { med -> DoseRow(med, day, logs, vm) }
+            dayMeds.forEach { med -> DoseRow(med, day, logs, vm) }
+            TextButton(onClick = { pickMed = true }) { Text("+ Приём препарата") }
         }
     }
+    if (pickMed) DosePickDialog(allMeds, day, vm) { pickMed = false }
 }
 
 private fun dayTitle(d: LocalDate, today: LocalDate): String = when (d) {
@@ -264,13 +221,6 @@ private fun dayTitle(d: LocalDate, today: LocalDate): String = when (d) {
     today.minusDays(1) -> "Вчера"
     else -> d.format(DateTimeFormatter.ofPattern(if (d.year == today.year) "d MMMM" else "d MMMM yyyy", RU)) +
         ", " + d.dayOfWeek.getDisplayName(TextStyle.SHORT, RU)
-}
-
-/** Короткая подпись для кнопки выбора дня в карточке лекарств. */
-private fun compactDayLabel(d: LocalDate, today: LocalDate): String = when (d) {
-    today -> "Сегодня"
-    today.minusDays(1) -> "Вчера"
-    else -> d.format(DateTimeFormatter.ofPattern(if (d.year == today.year) "d MMM" else "d MMM yy", RU))
 }
 
 @Composable
