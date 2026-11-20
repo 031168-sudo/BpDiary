@@ -64,6 +64,15 @@ fun MedicationsScreen(vm: MainViewModel, modifier: Modifier) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            item {
+                Text(
+                    "Отметить приём за любой день — в «Дневнике»: в карточке лекарств выберите день " +
+                        "стрелками или по дате. Там же «+ Приём препарата» — для приёма сверх плана " +
+                        "или препарата не из схемы.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (meds.isEmpty()) item {
                 Text("Список пуст", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
             }

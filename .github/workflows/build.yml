@@ -2,6 +2,8 @@ name: Build APK
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: write
@@ -22,12 +24,14 @@ jobs:
           name: BpDiary-apk
           path: Davlenie.apk
       - name: Publish release
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest Davlenie.apk --title "Давление (${GITHUB_SHA::7})" --notes "Сборка из ${GITHUB_SHA::7}"
       - name: Push APK to apk branch
+        if: github.event_name != 'pull_request'
         run: |
           mkdir out && cp Davlenie.apk out/ && cd out
           git init -q && git checkout -q -b apk

@@ -7,9 +7,12 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -55,7 +58,8 @@ private fun dosesWord(n: Int) = when {
  * Приём одного препарата за один день:
  *  • отмеченные приёмы — «✓ 09:12» (нажатие: изменить время или удалить);
  *  • пока не все приёмы сделаны — счётчик «осталось 2 из 3» и кнопка «Отметить приём»;
- *  • когда все сделаны — кнопка исчезает, вместо неё «все приёмы выполнены».
+ *  • когда все сделаны — «все приёмы выполнены» и «Ещё приём» (лишний приём сверх плана).
+ * День любой: так можно дозаписать забытую отметку задним числом.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -96,7 +100,8 @@ fun DoseRow(med: Medication, day: LocalDate, logs: List<DoseLog>, vm: MainViewMo
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.CheckCircle, null, Modifier.size(16.dp), tint = DONE)
                 Text(if (med.perDay == 1) "  Приём выполнен" else "  Все приёмы выполнены",
-                    color = DONE, style = MaterialTheme.typography.bodySmall)
+                    color = DONE, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                TextButton(onClick = { askAdd = true }) { Text("Ещё приём") }
             }
         } else if (day == today) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -121,9 +126,11 @@ fun DoseRow(med: Medication, day: LocalDate, logs: List<DoseLog>, vm: MainViewMo
         title = { Text(med.name) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Когда приняли?")
-                FilledTonalButton(onClick = { askAdd = false; vm.addDose(med, d, System.currentTimeMillis()) },
-                    modifier = Modifier.fillMaxWidth()) { Text("Сейчас, ${LocalTime.now().format(TIME_FMT)}") }
+                Text(if (day == today) "Когда приняли?" else "Когда приняли ${day.format(DATE_FMT)}?")
+                if (day == today) FilledTonalButton(
+                    onClick = { askAdd = false; vm.addDose(med, d, System.currentTimeMillis()) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Сейчас, ${LocalTime.now().format(TIME_FMT)}") }
                 OutlinedButton(onClick = { askAdd = false; addWithPicker() }, modifier = Modifier.fillMaxWidth()) {
                     Text("Указать время…")
                 }
@@ -153,4 +160,51 @@ fun DoseRow(med: Medication, day: LocalDate, logs: List<DoseLog>, vm: MainViewMo
             dismissButton = { TextButton(onClick = { editing = null }) { Text("Закрыть") } },
         )
     }
+}
+
+/**
+ * Отметка приёма «вне плана»: любой препарат из списка и любое время.
+ * Работает для любого дня — в том числе задним числом.
+ */
+@Composable
+fun DosePickDialog(meds: List<Medication>, day: LocalDate, vm: MainViewModel, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    val zone = ZoneId.systemDefault()
+    val today = LocalDate.now()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Приём препарата") },
+        text = {
+            Column(
+                Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    if (day == today) "Что приняли сегодня?"
+                    else "Что приняли ${day.format(DATE_FMT)}?",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                meds.forEach { m ->
+                    OutlinedButton(
+                        onClick = {
+                            onDismiss()
+                            val initial = if (day == today) LocalTime.now() else LocalTime.of(9, 0)
+                            pickTime(ctx, initial) { t ->
+                                vm.addDose(m, day.toEpochDay(), day.atTime(t).atZone(zone).toInstant().toEpochMilli())
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            "${m.name} ${m.dose}".trim() + if (m.isActiveOn(day.toEpochDay())) "" else " · не в плане",
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
 }
