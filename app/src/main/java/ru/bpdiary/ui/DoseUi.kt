@@ -23,6 +23,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -163,16 +164,27 @@ fun DoseRow(med: Medication, day: LocalDate, logs: List<DoseLog>, vm: MainViewMo
 }
 
 /**
- * Отметка приёма «вне плана»: любой препарат из списка и любое время.
- * Работает для любого дня — в том числе задним числом.
+ * Отметка приёма: препарат из списка или своё название (приём вне схемы),
+ * затем время. Работает для любого дня — в том числе задним числом.
  */
 @Composable
 fun DosePickDialog(meds: List<Medication>, day: LocalDate, vm: MainViewModel, onDismiss: () -> Unit) {
     val ctx = LocalContext.current
     val zone = ZoneId.systemDefault()
     val today = LocalDate.now()
+    var free by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf("") }
 
-    AlertDialog(
+    fun addAt(med: Medication?, freeName: String) {
+        val initial = if (day == today) LocalTime.now() else LocalTime.of(9, 0)
+        pickTime(ctx, initial) { t ->
+            val at = day.atTime(t).atZone(zone).toInstant().toEpochMilli()
+            if (med != null) vm.addDose(med, day.toEpochDay(), at)
+            else vm.addFreeDose(day.toEpochDay(), at, freeName)
+        }
+    }
+
+    if (!free) AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Приём препарата") },
         text = {
@@ -189,10 +201,7 @@ fun DosePickDialog(meds: List<Medication>, day: LocalDate, vm: MainViewModel, on
                     OutlinedButton(
                         onClick = {
                             onDismiss()
-                            val initial = if (day == today) LocalTime.now() else LocalTime.of(9, 0)
-                            pickTime(ctx, initial) { t ->
-                                vm.addDose(m, day.toEpochDay(), day.atTime(t).atZone(zone).toInstant().toEpochMilli())
-                            }
+                            addAt(m, "")
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
@@ -202,9 +211,81 @@ fun DosePickDialog(meds: List<Medication>, day: LocalDate, vm: MainViewModel, on
                         )
                     }
                 }
+                OutlinedButton(onClick = { free = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Другое название…")
+                }
             }
         },
         confirmButton = {},
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    ) else AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Приём вне схемы") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Название и доза") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    (if (day == today) "Сегодня" else day.format(DATE_FMT)) + " · время выберете на следующем шаге",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = name.isNotBlank(),
+                onClick = { val n = name.trim(); onDismiss(); addAt(null, n) },
+            ) { Text("Далее") }
+        },
+        dismissButton = { TextButton(onClick = { free = false }) { Text("Назад") } },
+    )
+}
+
+/** Отметка приёма препарата вне схемы: своё название, правка времени и удаление. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun FreeDoseRow(log: DoseLog, vm: MainViewModel) {
+    val ctx = LocalContext.current
+    val zone = ZoneId.systemDefault()
+    val day = LocalDate.ofEpochDay(log.day)
+    val t = timeOf(log)
+    var editing by remember { mutableStateOf(false) }
+    val title = log.freeName.ifBlank { "Приём препарата" }
+
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(
+            selected = true,
+            onClick = { editing = true },
+            label = { Text("$title · принял в ${t.format(TIME_FMT)}") },
+            leadingIcon = { Icon(Icons.Filled.Check, null, Modifier.size(16.dp)) },
+        )
+    }
+
+    if (editing) AlertDialog(
+        onDismissRequest = { editing = false },
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Отмечен приём в ${t.format(TIME_FMT)}")
+                OutlinedButton(onClick = {
+                    editing = false
+                    pickTime(ctx, t.toLocalTime()) { nt ->
+                        vm.editDoseTime(log, day.atTime(nt).atZone(zone).toInstant().toEpochMilli())
+                    }
+                }, modifier = Modifier.fillMaxWidth()) { Text("Изменить время…") }
+                OutlinedButton(
+                    onClick = { editing = false; vm.deleteDoseLog(log) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Удалить отметку", color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = { editing = false }) { Text("Закрыть") } },
     )
 }

@@ -23,7 +23,7 @@ class BackupFormatException(msg: String) : Exception(msg)
 
 object BackupCodec {
     private const val APP = "ru.bpdiary"
-    private const val FORMAT = 1
+    private const val FORMAT = 2
 
     fun encode(s: Snapshot): String {
         val root = JSONObject()
@@ -53,7 +53,9 @@ object BackupCodec {
         root.put("doseLogs", JSONArray().apply {
             s.doseLogs.forEach { l ->
                 put(JSONObject().apply {
-                    put("medicationId", l.medicationId); put("day", l.day); put("slot", l.slot); put("takenAt", l.takenAt)
+                    put("medicationId", l.medicationId ?: JSONObject.NULL)
+                    put("day", l.day); put("slot", l.slot); put("takenAt", l.takenAt)
+                    put("freeName", l.freeName)
                 })
             }
         })
@@ -91,9 +93,11 @@ object BackupCodec {
         }
         val medIds = meds.map { it.id }.toSet()
         val logs = root.optJSONArray("doseLogs")?.objects().orEmpty().map { o ->
-            DoseLog(medicationId = o.getLong("medicationId"), day = o.getLong("day"),
-                slot = o.getString("slot"), takenAt = o.getLong("takenAt"))
-        }.filter { it.medicationId in medIds }.distinctBy { Triple(it.medicationId, it.day, it.slot) }
+            DoseLog(medicationId = o.optLongOrNull("medicationId"), day = o.getLong("day"),
+                slot = o.getString("slot"), takenAt = o.getLong("takenAt"),
+                freeName = o.optString("freeName"))
+        }.filter { it.medicationId == null || it.medicationId in medIds }
+            .distinctBy { Triple(it.medicationId, it.day, it.slot) }
         return Snapshot(ms, meds, logs, root.optLong("createdAt", 0))
     }
 }

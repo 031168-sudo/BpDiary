@@ -71,6 +71,12 @@ abstract class DoseLogDao {
     @Query("DELETE FROM dose_logs WHERE medicationId = :medId AND day = :day AND slot = :slot")
     abstract suspend fun remove(medId: Long, day: Long, slot: String)
 
+    @Query("DELETE FROM dose_logs WHERE id = :id")
+    abstract suspend fun removeById(id: Long)
+
+    @Query("UPDATE dose_logs SET takenAt = :takenAt WHERE id = :id")
+    abstract suspend fun updateTakenAt(id: Long, takenAt: Long)
+
     @Query("SELECT * FROM dose_logs ORDER BY day, slot")
     abstract suspend fun all(): List<DoseLog>
 
@@ -83,14 +89,14 @@ abstract class DoseLogDao {
     /** Поставить отметку или поменять время уже поставленной. */
     @Transaction
     open suspend fun replace(log: DoseLog) {
-        remove(log.medicationId, log.day, log.slot)
+        log.medicationId?.let { remove(it, log.day, log.slot) }
         insert(log)
     }
 }
 
 @Database(
     entities = [Measurement::class, Medication::class, DoseLog::class],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -116,11 +122,42 @@ abstract class AppDatabase : RoomDatabase() {
 
         @Volatile private var instance: AppDatabase? = null
 
+        /**
+         * v2 → v3: приём может быть «вне схемы» — препарат не заводится,
+         * название хранится в freeName. Поэтому medicationId становится необязательным,
+         * а таблицу приходится пересоздавать (SQLite не умеет снимать NOT NULL).
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `dose_logs_new` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`medicationId` INTEGER, " +
+                        "`day` INTEGER NOT NULL, " +
+                        "`slot` TEXT NOT NULL, " +
+                        "`takenAt` INTEGER NOT NULL, " +
+                        "`freeName` TEXT NOT NULL, " +
+                        "FOREIGN KEY(`medicationId`) REFERENCES `medications`(`id`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE )"
+                )
+                db.execSQL(
+                    "INSERT INTO `dose_logs_new` (`id`, `medicationId`, `day`, `slot`, `takenAt`, `freeName`) " +
+                        "SELECT `id`, `medicationId`, `day`, `slot`, `takenAt`, '' FROM `dose_logs`"
+                )
+                db.execSQL("DROP TABLE `dose_logs`")
+                db.execSQL("ALTER TABLE `dose_logs_new` RENAME TO `dose_logs`")
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_dose_logs_medicationId_day_slot` " +
+                        "ON `dose_logs` (`medicationId`, `day`, `slot`)"
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
                     context.applicationContext, AppDatabase::class.java, "bp_diary.db"
-                ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
             }
     }
 }

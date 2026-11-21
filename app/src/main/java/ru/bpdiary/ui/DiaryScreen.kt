@@ -97,16 +97,8 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier, onOpenBackup: () -> Unit 
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             // приём лекарств сегодня
-            if (activeMeds.isNotEmpty()) item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Лекарства сегодня", style = MaterialTheme.typography.titleMedium)
-                        activeMeds.forEach { med ->
-                            Spacer(Modifier.size(6.dp))
-                            DoseRow(med, today, logs, vm)
-                        }
-                    }
-                }
+            if (meds.isNotEmpty()) item {
+                TodayMedsCard(meds, activeMeds, logs, vm, today)
             }
             // напоминание о резервной копии
             if (list.isNotEmpty() && (backup.folder == null || backup.error != null)) item {
@@ -164,13 +156,15 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier, onOpenBackup: () -> Unit 
                 val dayMeds = if (day == today) emptyList() else meds.filter {
                     it.isActiveOn(day.toEpochDay()) || it.logsOn(logs, day.toEpochDay()).isNotEmpty()
                 }
-                if (dayItems.isEmpty() && dayMeds.isEmpty()) return@forEach
+                val freeDoses = if (day == today) emptyList()
+                else logs.filter { it.medicationId == null && it.day == day.toEpochDay() }
+                if (dayItems.isEmpty() && dayMeds.isEmpty() && freeDoses.isEmpty()) return@forEach
                 item(key = "h$day") {
                     Text(dayTitle(day, today), style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
                 }
-                if (dayMeds.isNotEmpty()) item(key = "d$day") {
-                    DoseDayBlock(day, dayMeds, meds, logs, vm)
+                if (dayMeds.isNotEmpty() || freeDoses.isNotEmpty()) item(key = "d$day") {
+                    DoseDayBlock(day, dayMeds, freeDoses, meds, logs, vm)
                 }
                 items(dayItems, key = { it.id }) { m ->
                     MeasurementRow(m, analysis?.anomalyIds?.containsKey(m.id) == true) { editing = m }
@@ -194,11 +188,12 @@ fun DiaryScreen(vm: MainViewModel, modifier: Modifier, onOpenBackup: () -> Unit 
     }
 }
 
-/** Приём лекарств за прошедший день: отмеченные приёмы, пропуски, отметка задним числом и приём вне плана. */
+/** Приём лекарств за прошедший день: отмеченные приёмы, пропуски, отметки задним числом и приёмы вне схемы. */
 @Composable
 private fun DoseDayBlock(
     day: LocalDate,
     dayMeds: List<Medication>,
+    freeDoses: List<DoseLog>,
     allMeds: List<Medication>,
     logs: List<DoseLog>,
     vm: MainViewModel,
@@ -210,10 +205,46 @@ private fun DoseDayBlock(
     ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             dayMeds.forEach { med -> DoseRow(med, day, logs, vm) }
+            freeDoses.forEach { log -> FreeDoseRow(log, vm) }
             TextButton(onClick = { pickMed = true }) { Text("+ Приём препарата") }
         }
     }
     if (pickMed) DosePickDialog(allMeds, day, vm) { pickMed = false }
+}
+
+/** Лекарства на сегодня: отметки по схеме и приёмы вне её. */
+@Composable
+private fun TodayMedsCard(
+    allMeds: List<Medication>,
+    activeMeds: List<Medication>,
+    logs: List<DoseLog>,
+    vm: MainViewModel,
+    today: LocalDate,
+) {
+    var pickMed by remember { mutableStateOf(false) }
+    val freeToday = logs.filter { it.medicationId == null && it.day == today.toEpochDay() }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Лекарства сегодня", style = MaterialTheme.typography.titleMedium)
+            if (activeMeds.isEmpty()) {
+                Text(
+                    "Препаратов по плану нет",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            activeMeds.forEach { med ->
+                Spacer(Modifier.size(6.dp))
+                DoseRow(med, today, logs, vm)
+            }
+            if (freeToday.isNotEmpty()) {
+                Spacer(Modifier.size(6.dp))
+                freeToday.forEach { log -> FreeDoseRow(log, vm) }
+            }
+            TextButton(onClick = { pickMed = true }) { Text("+ Приём препарата") }
+        }
+    }
+    if (pickMed) DosePickDialog(allMeds, today, vm) { pickMed = false }
 }
 
 private fun dayTitle(d: LocalDate, today: LocalDate): String = when (d) {

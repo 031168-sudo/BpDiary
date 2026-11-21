@@ -133,7 +133,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteDose(log: DoseLog) = viewModelScope.launch {
-        db.doseLogs().remove(log.medicationId, log.day, log.slot)
+        log.medicationId?.let { db.doseLogs().remove(it, log.day, log.slot) }
+    }
+
+    /** Приём вне схемы: любое название, любой день, без заведения препарата. */
+    fun addFreeDose(day: Long, takenAt: Long, name: String) = viewModelScope.launch {
+        doseLock.withLock {
+            val used = db.doseLogs().all()
+                .filter { it.medicationId == null && it.day == day }
+                .map { it.slot }.toSet()
+            val slot = generateSequence(1) { it + 1 }.map { "#free$it" }.first { it !in used }
+            db.doseLogs().insert(
+                DoseLog(medicationId = null, day = day, slot = slot, takenAt = takenAt, freeName = name.trim())
+            )
+        }
+    }
+
+    fun editDoseTime(log: DoseLog, takenAt: Long) = viewModelScope.launch {
+        db.doseLogs().updateTakenAt(log.id, takenAt)
+    }
+
+    fun deleteDoseLog(log: DoseLog) = viewModelScope.launch {
+        db.doseLogs().removeById(log.id)
     }
 
     suspend fun buildReport(from: LocalDate, to: LocalDate): Uri = withContext(Dispatchers.Default) {

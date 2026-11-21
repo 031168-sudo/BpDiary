@@ -68,7 +68,7 @@ fun MedicationsScreen(vm: MainViewModel, modifier: Modifier) {
                 Text(
                     "Отметить приём за прошедший день можно в «Дневнике»: в блоке нужного дня — " +
                         "«Отметить приём» (если норма не выполнена) или «Ещё приём», а «+ Приём препарата» " +
-                        "добавляет приём любого препарата, в том числе не из схемы.",
+                        "добавляет приём препарата из списка или введённого вручную (например, разовый каптоприл).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

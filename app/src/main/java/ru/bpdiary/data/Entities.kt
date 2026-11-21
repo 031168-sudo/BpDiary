@@ -71,8 +71,11 @@ fun perDayText(n: Int) = when {
 )
 data class DoseLog(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val medicationId: Long,
+    /** null — приём вне схемы: препарат не заводится, название хранится в freeName. */
+    val medicationId: Long? = null,
     val day: Long,
     val slot: String,
     val takenAt: Long,
+    /** Название разового приёма (вне схемы); у отметок по препарату пусто. */
+    val freeName: String = "",
 )
